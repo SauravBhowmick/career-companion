@@ -1,0 +1,141 @@
+import { motion, AnimatePresence } from "framer-motion";
+import { X, Bell, Zap, Shield, Sliders } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
+import { useState } from "react";
+
+interface SettingsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
+  const [settings, setSettings] = useState({
+    autoApply: true,
+    emailNotifications: true,
+    instantNotifications: false,
+    matchThreshold: 75,
+  });
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
+            onClick={onClose}
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-card p-6 shadow-xl"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="font-display text-xl font-semibold">Auto-Apply Settings</h2>
+              <Button variant="ghost" size="icon" onClick={onClose}>
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Auto Apply */}
+              <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg gradient-primary">
+                    <Zap className="h-5 w-5 text-primary-foreground" />
+                  </div>
+                  <div>
+                    <Label className="font-medium">Auto-Apply</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Automatically apply to matching jobs
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={settings.autoApply}
+                  onCheckedChange={(checked) => setSettings({ ...settings, autoApply: checked })}
+                />
+              </div>
+
+              {/* Match Threshold */}
+              <div className="p-4 rounded-xl bg-muted/50">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 rounded-lg bg-accent">
+                    <Sliders className="h-5 w-5 text-accent-foreground" />
+                  </div>
+                  <div>
+                    <Label className="font-medium">Match Threshold</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Only auto-apply to jobs with {settings.matchThreshold}%+ match
+                    </p>
+                  </div>
+                </div>
+                <Slider
+                  value={[settings.matchThreshold]}
+                  onValueChange={([value]) => setSettings({ ...settings, matchThreshold: value })}
+                  min={50}
+                  max={100}
+                  step={5}
+                  className="mt-2"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground mt-2">
+                  <span>50%</span>
+                  <span className="font-semibold text-primary">{settings.matchThreshold}%</span>
+                  <span>100%</span>
+                </div>
+              </div>
+
+              {/* Email Notifications */}
+              <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-success">
+                    <Bell className="h-5 w-5 text-success-foreground" />
+                  </div>
+                  <div>
+                    <Label className="font-medium">Email Notifications</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Get daily digest of new matching jobs
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={settings.emailNotifications}
+                  onCheckedChange={(checked) => setSettings({ ...settings, emailNotifications: checked })}
+                />
+              </div>
+
+              {/* Instant Notifications */}
+              <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-secondary">
+                    <Shield className="h-5 w-5 text-secondary-foreground" />
+                  </div>
+                  <div>
+                    <Label className="font-medium">Instant Alerts</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Notify immediately for 90%+ matches
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={settings.instantNotifications}
+                  onCheckedChange={(checked) => setSettings({ ...settings, instantNotifications: checked })}
+                />
+              </div>
+
+              <Button variant="hero" className="w-full" size="lg">
+                Save Settings
+              </Button>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
