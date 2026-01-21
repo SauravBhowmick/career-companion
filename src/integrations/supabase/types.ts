@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      cv_upload_history: {
+        Row: {
+          file_name: string
+          file_path: string
+          file_size: number | null
+          id: string
+          parsing_status: string | null
+          skills_extracted: number | null
+          uploaded_at: string
+          user_id: string
+        }
+        Insert: {
+          file_name: string
+          file_path: string
+          file_size?: number | null
+          id?: string
+          parsing_status?: string | null
+          skills_extracted?: number | null
+          uploaded_at?: string
+          user_id: string
+        }
+        Update: {
+          file_name?: string
+          file_path?: string
+          file_size?: number | null
+          id?: string
+          parsing_status?: string | null
+          skills_extracted?: number | null
+          uploaded_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       job_applications: {
         Row: {
           applied_at: string | null
