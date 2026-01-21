@@ -14,7 +14,174 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      job_applications: {
+        Row: {
+          applied_at: string | null
+          auto_applied: boolean | null
+          company: string
+          id: string
+          job_title: string
+          job_type: string | null
+          location: string | null
+          match_score: number | null
+          salary_range: string | null
+          status: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          applied_at?: string | null
+          auto_applied?: boolean | null
+          company: string
+          id?: string
+          job_title: string
+          job_type?: string | null
+          location?: string | null
+          match_score?: number | null
+          salary_range?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          applied_at?: string | null
+          auto_applied?: boolean | null
+          company?: string
+          id?: string
+          job_title?: string
+          job_type?: string | null
+          location?: string | null
+          match_score?: number | null
+          salary_range?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string | null
+          current_title: string | null
+          cv_url: string | null
+          email: string | null
+          experience_years: number | null
+          full_name: string | null
+          id: string
+          preferred_location: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          current_title?: string | null
+          cv_url?: string | null
+          email?: string | null
+          experience_years?: number | null
+          full_name?: string | null
+          id?: string
+          preferred_location?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          current_title?: string | null
+          cv_url?: string | null
+          email?: string | null
+          experience_years?: number | null
+          full_name?: string | null
+          id?: string
+          preferred_location?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      saved_jobs: {
+        Row: {
+          company: string
+          id: string
+          job_external_id: string
+          job_title: string
+          saved_at: string | null
+          user_id: string
+        }
+        Insert: {
+          company: string
+          id?: string
+          job_external_id: string
+          job_title: string
+          saved_at?: string | null
+          user_id: string
+        }
+        Update: {
+          company?: string
+          id?: string
+          job_external_id?: string
+          job_title?: string
+          saved_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_preferences: {
+        Row: {
+          auto_apply_enabled: boolean | null
+          created_at: string | null
+          email_notifications: boolean | null
+          id: string
+          instant_notifications: boolean | null
+          match_threshold: number | null
+          preferred_job_types: string[] | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          auto_apply_enabled?: boolean | null
+          created_at?: string | null
+          email_notifications?: boolean | null
+          id?: string
+          instant_notifications?: boolean | null
+          match_threshold?: number | null
+          preferred_job_types?: string[] | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          auto_apply_enabled?: boolean | null
+          created_at?: string | null
+          email_notifications?: boolean | null
+          id?: string
+          instant_notifications?: boolean | null
+          match_threshold?: number | null
+          preferred_job_types?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_skills: {
+        Row: {
+          created_at: string | null
+          id: string
+          skill: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          skill: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          skill?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
