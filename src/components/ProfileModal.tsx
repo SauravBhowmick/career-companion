@@ -1,11 +1,12 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Upload, User, Mail, Briefcase, MapPin, Plus, Loader2, FileText, Trash2, CheckCircle } from "lucide-react";
+import { X, Upload, User, Mail, Briefcase, MapPin, Plus, Loader2, FileText, Trash2, CheckCircle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useState, useEffect, useRef } from "react";
 import { useProfile } from "@/hooks/useProfile";
+import { useCVParser } from "@/hooks/useCVParser";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -17,10 +18,12 @@ interface ProfileModalProps {
 
 export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
   const { user } = useAuth();
-  const { profile, skills, loading, updateProfile, addSkill, removeSkill } = useProfile();
+  const { profile, skills, loading, updateProfile, addSkill, removeSkill, refetch } = useProfile();
+  const { parseAndNotify } = useCVParser();
   const [newSkill, setNewSkill] = useState("");
   const [cvFileName, setCvFileName] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [parsing, setParsing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     full_name: "",
@@ -107,11 +110,19 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
       await updateProfile({ cv_url: filePath });
       setCvFileName(file.name);
       toast.success("Resume uploaded successfully!");
+
+      // Trigger AI parsing
+      setParsing(true);
+      await parseAndNotify(user.id, filePath, () => {
+        refetch(); // Refresh profile and skills after parsing
+      });
+      setParsing(false);
     } catch (error: any) {
       console.error("Upload error:", error);
       toast.error(error.message || "Failed to upload resume");
     } finally {
       setUploading(false);
+      setParsing(false);
     }
   };
 
@@ -180,38 +191,48 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                   className="hidden"
                 />
                 
-                {cvFileName ? (
-                  <div className="flex items-center justify-between p-4 rounded-xl border border-success bg-success/5">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-lg bg-success">
-                        <CheckCircle className="h-5 w-5 text-success-foreground" />
+{cvFileName ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-4 rounded-xl border border-success bg-success/5">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-success">
+                          <CheckCircle className="h-5 w-5 text-success-foreground" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-success">Resume Uploaded</p>
+                          <p className="text-sm text-muted-foreground flex items-center gap-1">
+                            <FileText className="h-3 w-3" />
+                            {cvFileName.length > 30 ? cvFileName.substring(0, 30) + '...' : cvFileName}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium text-success">Resume Uploaded</p>
-                        <p className="text-sm text-muted-foreground flex items-center gap-1">
-                          <FileText className="h-3 w-3" />
-                          {cvFileName.length > 30 ? cvFileName.substring(0, 30) + '...' : cvFileName}
-                        </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploading || parsing}
+                        >
+                          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Replace"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleDeleteResume}
+                          className="text-destructive hover:text-destructive"
+                          disabled={parsing}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={uploading}
-                      >
-                        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Replace"}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleDeleteResume}
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+                    {parsing && (
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/10 text-primary">
+                        <Sparkles className="h-4 w-4 animate-pulse" />
+                        <span className="text-sm font-medium">AI is analyzing your resume...</span>
+                        <Loader2 className="h-4 w-4 animate-spin ml-auto" />
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div
@@ -227,11 +248,10 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                       {uploading ? "Uploading..." : "Upload your CV/Resume"}
                     </p>
                     <p className="text-sm text-muted-foreground mt-1">
-                      PDF, DOC, or DOCX (max 5MB)
+                      PDF, DOC, or DOCX (max 5MB) • AI will extract skills automatically
                     </p>
                   </div>
                 )}
-
                 {/* Basic Info */}
                 <div className="grid gap-4">
                   <div className="grid gap-2">
