@@ -1,14 +1,25 @@
 import { motion } from "framer-motion";
-import { Bell, Settings, User, Zap } from "lucide-react";
+import { Bell, Settings, User, Zap, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface HeaderProps {
   onOpenProfile: () => void;
   onOpenSettings: () => void;
+  onOpenAuth: () => void;
 }
 
-export function Header({ onOpenProfile, onOpenSettings }: HeaderProps) {
+export function Header({ onOpenProfile, onOpenSettings, onOpenAuth }: HeaderProps) {
+  const { user, signOut } = useAuth();
+
   return (
     <motion.header
       initial={{ y: -20, opacity: 0 }}
@@ -43,18 +54,45 @@ export function Header({ onOpenProfile, onOpenSettings }: HeaderProps) {
         </nav>
 
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="h-5 w-5" />
-            <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-accent text-[10px] font-bold flex items-center justify-center text-accent-foreground">
-              3
-            </span>
-          </Button>
-          <Button variant="ghost" size="icon" onClick={onOpenSettings}>
-            <Settings className="h-5 w-5" />
-          </Button>
-          <Button variant="ghost" size="icon" onClick={onOpenProfile}>
-            <User className="h-5 w-5" />
-          </Button>
+          {user ? (
+            <>
+              <Button variant="ghost" size="icon" className="relative">
+                <Bell className="h-5 w-5" />
+                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-accent text-[10px] font-bold flex items-center justify-center text-accent-foreground">
+                  3
+                </span>
+              </Button>
+              <Button variant="ghost" size="icon" onClick={onOpenSettings}>
+                <Settings className="h-5 w-5" />
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <User className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={onOpenProfile}>
+                    <User className="h-4 w-4 mr-2" />
+                    Profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={onOpenSettings}>
+                    <Settings className="h-4 w-4 mr-2" />
+                    Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={signOut} className="text-destructive">
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Sign Out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          ) : (
+            <Button variant="hero" onClick={onOpenAuth}>
+              Sign In
+            </Button>
+          )}
         </div>
       </div>
     </motion.header>

@@ -1,14 +1,23 @@
 import { motion } from "framer-motion";
 import { Briefcase, CheckCircle, Clock, Zap } from "lucide-react";
 
-const stats = [
-  { icon: Briefcase, label: "Jobs Matched", value: "24", color: "text-primary" },
-  { icon: Zap, label: "Auto-Applied", value: "8", color: "text-accent" },
-  { icon: Clock, label: "Pending", value: "12", color: "text-muted-foreground" },
-  { icon: CheckCircle, label: "Interviews", value: "3", color: "text-success" },
-];
+interface StatsBarProps {
+  stats: {
+    matched: number;
+    autoApplied: number;
+    pending: number;
+    interviews: number;
+  };
+}
 
-export function StatsBar() {
+export function StatsBar({ stats }: StatsBarProps) {
+  const statItems = [
+    { icon: Briefcase, label: "Jobs Matched", value: stats.matched.toString(), color: "text-primary" },
+    { icon: Zap, label: "Auto-Applied", value: stats.autoApplied.toString(), color: "text-accent" },
+    { icon: Clock, label: "Pending", value: stats.pending.toString(), color: "text-muted-foreground" },
+    { icon: CheckCircle, label: "Interviews", value: stats.interviews.toString(), color: "text-success" },
+  ];
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -17,7 +26,7 @@ export function StatsBar() {
       className="container py-6"
     >
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {stats.map((stat, index) => (
+        {statItems.map((stat, index) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, scale: 0.95 }}
