@@ -1,12 +1,12 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Bell, Zap, Shield, Sliders, Loader2 } from "lucide-react";
+import { X, Bell, Zap, Shield, Sliders, Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { useState, useEffect } from "react";
 import { useProfile } from "@/hooks/useProfile";
-
+import { useJobAlerts } from "@/hooks/useJobAlerts";
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -14,6 +14,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { preferences, loading, updatePreferences } = useProfile();
+  const { testJobAlert } = useJobAlerts();
   const [settings, setSettings] = useState({
     auto_apply_enabled: false,
     email_notifications: true,
@@ -21,7 +22,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     match_threshold: 75,
   });
   const [saving, setSaving] = useState(false);
+  const [sendingTest, setSendingTest] = useState(false);
 
+  const handleTestEmail = async () => {
+    setSendingTest(true);
+    await testJobAlert();
+    setSendingTest(false);
+  };
   useEffect(() => {
     if (preferences) {
       setSettings({
@@ -118,22 +125,40 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 {/* Email Notifications */}
-                <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-success">
-                      <Bell className="h-5 w-5 text-success-foreground" />
+                <div className="p-4 rounded-xl bg-muted/50">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-success">
+                        <Bell className="h-5 w-5 text-success-foreground" />
+                      </div>
+                      <div>
+                        <Label className="font-medium">Email Notifications</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Get daily digest of new matching jobs
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <Label className="font-medium">Email Notifications</Label>
-                      <p className="text-sm text-muted-foreground">
-                        Get daily digest of new matching jobs
-                      </p>
-                    </div>
+                    <Switch
+                      checked={settings.email_notifications}
+                      onCheckedChange={(checked) => setSettings({ ...settings, email_notifications: checked })}
+                    />
                   </div>
-                  <Switch
-                    checked={settings.email_notifications}
-                    onCheckedChange={(checked) => setSettings({ ...settings, email_notifications: checked })}
-                  />
+                  {settings.email_notifications && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3 w-full"
+                      onClick={handleTestEmail}
+                      disabled={sendingTest}
+                    >
+                      {sendingTest ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Send className="h-4 w-4 mr-2" />
+                      )}
+                      Send Test Email
+                    </Button>
+                  )}
                 </div>
 
                 {/* Instant Notifications */}
