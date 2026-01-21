@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { motion } from "framer-motion";
-import { RefreshCw, Loader2 } from "lucide-react";
+import { RefreshCw, Loader2, Sparkles } from "lucide-react";
 import { Header } from "@/components/Header";
 import { HeroSection } from "@/components/HeroSection";
 import { StatsBar } from "@/components/StatsBar";
@@ -15,6 +15,7 @@ import { Job } from "@/types/job";
 import { useAuth } from "@/hooks/useAuth";
 import { useJobApplications } from "@/hooks/useJobApplications";
 import { useRealJobs } from "@/hooks/useRealJobs";
+import { useJobMatcher } from "@/hooks/useJobMatcher";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -22,6 +23,8 @@ const Index = () => {
   const { user } = useAuth();
   const { applyToJob, saveJob, isJobSaved, applications } = useJobApplications();
   const { jobs: realJobs, loading: loadingRealJobs, fetchJobs } = useRealJobs();
+  const { matchJobs, matching } = useJobMatcher();
+  const [matchedJobs, setMatchedJobs] = useState<Job[]>([]);
   
   const [searchQuery, setSearchQuery] = useState("");
   const [useRealData, setUseRealData] = useState(false);
@@ -50,6 +53,20 @@ const Index = () => {
     return () => clearTimeout(timeoutId);
   }, [searchQuery, useRealData, filters.locations, filters.jobTypes, fetchJobs]);
 
+  // Run AI matching when jobs change or user logs in
+  useEffect(() => {
+    const runMatching = async () => {
+      const jobsToMatch = useRealData ? realJobs : mockJobs;
+      if (user && jobsToMatch.length > 0) {
+        const matched = await matchJobs(jobsToMatch);
+        setMatchedJobs(matched);
+      } else {
+        setMatchedJobs(jobsToMatch);
+      }
+    };
+    runMatching();
+  }, [user, realJobs, useRealData, matchJobs]);
+
   const handleFetchRealJobs = () => {
     setUseRealData(true);
     fetchJobs({
@@ -59,8 +76,19 @@ const Index = () => {
     });
   };
 
-  const activeJobs = useRealData ? realJobs : mockJobs;
+  const handleRefreshMatching = async () => {
+    if (!user) {
+      toast.info("Please sign in to get personalized match scores");
+      setIsAuthOpen(true);
+      return;
+    }
+    const jobsToMatch = useRealData ? realJobs : mockJobs;
+    const matched = await matchJobs(jobsToMatch);
+    setMatchedJobs(matched);
+    toast.success("Match scores updated based on your profile!");
+  };
 
+  const activeJobs = matchedJobs.length > 0 ? matchedJobs : (useRealData ? realJobs : mockJobs);
   const filteredJobs = useMemo(() => {
     return activeJobs.filter((job) => {
       // Search filter (only for mock data, real data is already filtered)
@@ -166,20 +194,36 @@ const Index = () => {
                   {filteredJobs.length} jobs found {useRealData && "• Powered by Firecrawl"}
                 </p>
               </div>
-              <Button
-                variant={useRealData ? "outline" : "default"}
-                size="sm"
-                onClick={handleFetchRealJobs}
-                disabled={loadingRealJobs}
-                className="flex items-center gap-2"
-              >
-                {loadingRealJobs ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-                {useRealData ? "Refresh" : "Fetch Real Jobs"}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRefreshMatching}
+                  disabled={matching}
+                  className="flex items-center gap-2"
+                >
+                  {matching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {matching ? "Matching..." : "AI Match"}
+                </Button>
+                <Button
+                  variant={useRealData ? "outline" : "default"}
+                  size="sm"
+                  onClick={handleFetchRealJobs}
+                  disabled={loadingRealJobs}
+                  className="flex items-center gap-2"
+                >
+                  {loadingRealJobs ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  {useRealData ? "Refresh" : "Fetch Real Jobs"}
+                </Button>
+              </div>
             </div>
 
             {filteredJobs.length === 0 ? (

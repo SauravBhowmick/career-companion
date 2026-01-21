@@ -13,6 +13,7 @@ export interface Job {
   isNew?: boolean;
   isFeatured?: boolean;
   matchScore?: number;
+  matchReason?: string;
 }
 
 export interface UserProfile {

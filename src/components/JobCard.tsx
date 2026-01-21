@@ -65,7 +65,13 @@ export function JobCard({ job, index, onApply, onSave, isSaved }: JobCardProps) 
                   <Zap className="h-4 w-4" />
                   <span>{job.matchScore}%</span>
                 </div>
-                <span className="text-xs text-muted-foreground">match</span>
+                {job.matchReason ? (
+                  <span className="text-xs text-muted-foreground max-w-[120px] text-right truncate" title={job.matchReason}>
+                    {job.matchReason}
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">match</span>
+                )}
               </div>
             )}
           </div>
