@@ -144,6 +144,27 @@ export function useJobApplications() {
     return savedJobs.some(s => s.job_external_id === jobId);
   };
 
+  const updateApplicationStatus = async (
+    applicationId: string,
+    status: JobApplication["status"]
+  ) => {
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("job_applications")
+      .update({ status })
+      .eq("id", applicationId)
+      .eq("user_id", user.id);
+
+    if (error) {
+      toast.error("Failed to update status");
+      console.error(error);
+    } else {
+      toast.success(`Status updated to ${status}`);
+      fetchApplications();
+    }
+  };
+
   return {
     applications,
     savedJobs,
@@ -151,6 +172,7 @@ export function useJobApplications() {
     applyToJob,
     saveJob,
     isJobSaved,
+    updateApplicationStatus,
     refetch: () => {
       fetchApplications();
       fetchSavedJobs();
