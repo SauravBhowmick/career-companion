@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { Briefcase, CheckCircle, Clock, Zap } from "lucide-react";
 
 interface StatsBarProps {
-  stats: {
+  stats?: {
     matched: number;
     autoApplied: number;
     pending: number;
@@ -10,7 +10,14 @@ interface StatsBarProps {
   };
 }
 
-export function StatsBar({ stats }: StatsBarProps) {
+const defaultStats = {
+  matched: 0,
+  autoApplied: 0,
+  pending: 0,
+  interviews: 0,
+};
+
+export function StatsBar({ stats = defaultStats }: StatsBarProps) {
   const statItems = [
     { icon: Briefcase, label: "Jobs Matched", value: stats.matched.toString(), color: "text-primary" },
     { icon: Zap, label: "Auto-Applied", value: stats.autoApplied.toString(), color: "text-accent" },
