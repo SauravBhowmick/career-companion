@@ -8,15 +8,21 @@ import { JobFilters } from "@/components/JobFilters";
 import { ProfileModal } from "@/components/ProfileModal";
 import { SettingsModal } from "@/components/SettingsModal";
 import { ApplyModal } from "@/components/ApplyModal";
+import { AuthModal } from "@/components/AuthModal";
 import { mockJobs } from "@/data/mockJobs";
 import { Job } from "@/types/job";
+import { useAuth } from "@/hooks/useAuth";
+import { useJobApplications } from "@/hooks/useJobApplications";
 import { toast } from "sonner";
 
 const Index = () => {
+  const { user } = useAuth();
+  const { applyToJob, saveJob, isJobSaved, applications } = useJobApplications();
+  
   const [searchQuery, setSearchQuery] = useState("");
-  const [savedJobs, setSavedJobs] = useState<string[]>([]);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [applyJob, setApplyJob] = useState<Job | null>(null);
   const [filters, setFilters] = useState({
     jobTypes: [] as string[],
@@ -51,37 +57,63 @@ const Index = () => {
     });
   }, [searchQuery, filters]);
 
-  const handleSaveJob = (job: Job) => {
-    if (savedJobs.includes(job.id)) {
-      setSavedJobs(savedJobs.filter((id) => id !== job.id));
-      toast.info(`Removed ${job.title} from saved jobs`);
-    } else {
-      setSavedJobs([...savedJobs, job.id]);
-      toast.success(`Saved ${job.title}`);
+  const handleApply = (job: Job) => {
+    if (!user) {
+      toast.info("Please sign in to apply for jobs");
+      setIsAuthOpen(true);
+      return;
     }
+    setApplyJob(job);
+  };
+
+  const handleSave = (job: Job) => {
+    if (!user) {
+      toast.info("Please sign in to save jobs");
+      setIsAuthOpen(true);
+      return;
+    }
+    saveJob(job);
   };
 
   const handleApplyConfirm = (autoApplySimilar: boolean) => {
     if (applyJob) {
-      if (autoApplySimilar) {
-        toast.success(`Applied to ${applyJob.title}! Auto-apply enabled for similar roles.`);
-      } else {
-        toast.success(`Applied to ${applyJob.title}!`);
-      }
+      applyToJob(applyJob, autoApplySimilar);
     }
     setApplyJob(null);
+  };
+
+  const stats = {
+    matched: mockJobs.length,
+    autoApplied: applications.filter(a => a.auto_applied).length,
+    pending: applications.filter(a => a.status === "applied" || a.status === "viewed").length,
+    interviews: applications.filter(a => a.status === "interview").length,
   };
 
   return (
     <div className="min-h-screen bg-background">
       <Header
-        onOpenProfile={() => setIsProfileOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenProfile={() => {
+          if (!user) {
+            toast.info("Please sign in to view your profile");
+            setIsAuthOpen(true);
+            return;
+          }
+          setIsProfileOpen(true);
+        }}
+        onOpenSettings={() => {
+          if (!user) {
+            toast.info("Please sign in to access settings");
+            setIsAuthOpen(true);
+            return;
+          }
+          setIsSettingsOpen(true);
+        }}
+        onOpenAuth={() => setIsAuthOpen(true)}
       />
 
       <HeroSection searchQuery={searchQuery} onSearchChange={setSearchQuery} />
       
-      <StatsBar />
+      <StatsBar stats={stats} />
 
       <main className="container pb-20">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
@@ -122,9 +154,9 @@ const Index = () => {
                     key={job.id}
                     job={job}
                     index={index}
-                    onApply={setApplyJob}
-                    onSave={handleSaveJob}
-                    isSaved={savedJobs.includes(job.id)}
+                    onApply={handleApply}
+                    onSave={handleSave}
+                    isSaved={isJobSaved(job.id)}
                   />
                 ))}
               </div>
@@ -134,6 +166,11 @@ const Index = () => {
       </main>
 
       {/* Modals */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onSuccess={() => {}}
+      />
       <ProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <ApplyModal
