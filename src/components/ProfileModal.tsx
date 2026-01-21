@@ -1,11 +1,14 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Upload, User, Mail, Briefcase, MapPin, Plus, Loader2 } from "lucide-react";
+import { X, Upload, User, Mail, Briefcase, MapPin, Plus, Loader2, FileText, Trash2, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useProfile } from "@/hooks/useProfile";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -13,9 +16,12 @@ interface ProfileModalProps {
 }
 
 export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
+  const { user } = useAuth();
   const { profile, skills, loading, updateProfile, addSkill, removeSkill } = useProfile();
   const [newSkill, setNewSkill] = useState("");
-  const [cvUploaded, setCvUploaded] = useState(false);
+  const [cvFileName, setCvFileName] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     full_name: "",
     email: "",
@@ -32,7 +38,11 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
         current_title: profile.current_title || "",
         preferred_location: profile.preferred_location || "",
       });
-      setCvUploaded(!!profile.cv_url);
+      if (profile.cv_url) {
+        // Extract filename from URL
+        const parts = profile.cv_url.split('/');
+        setCvFileName(parts[parts.length - 1]);
+      }
     }
   }, [profile]);
 
@@ -40,6 +50,87 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
     if (newSkill.trim()) {
       await addSkill(newSkill.trim());
       setNewSkill("");
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+
+    // Validate file type
+    const allowedTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
+    
+    if (!allowedTypes.includes(file.type)) {
+      toast.error("Please upload a PDF, DOC, or DOCX file");
+      return;
+    }
+
+    // Validate file size (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("File size must be less than 5MB");
+      return;
+    }
+
+    setUploading(true);
+
+    try {
+      // Create unique file path: userId/timestamp_filename
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}_resume.${fileExt}`;
+      const filePath = `${user.id}/${fileName}`;
+
+      // Delete old resume if exists
+      if (profile?.cv_url) {
+        const oldPath = profile.cv_url.split('/resumes/')[1];
+        if (oldPath) {
+          await supabase.storage.from('resumes').remove([oldPath]);
+        }
+      }
+
+      // Upload new file
+      const { error: uploadError } = await supabase.storage
+        .from('resumes')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // Get the URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('resumes')
+        .getPublicUrl(filePath);
+
+      // Update profile with CV URL
+      await updateProfile({ cv_url: filePath });
+      setCvFileName(file.name);
+      toast.success("Resume uploaded successfully!");
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      toast.error(error.message || "Failed to upload resume");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteResume = async () => {
+    if (!user || !profile?.cv_url) return;
+
+    try {
+      const { error } = await supabase.storage
+        .from('resumes')
+        .remove([profile.cv_url]);
+
+      if (error) throw error;
+
+      await updateProfile({ cv_url: null });
+      setCvFileName(null);
+      toast.success("Resume deleted");
+    } catch (error: any) {
+      console.error("Delete error:", error);
+      toast.error("Failed to delete resume");
     }
   };
 
@@ -81,18 +172,65 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
             ) : (
               <div className="space-y-6">
                 {/* CV Upload */}
-                <div
-                  className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
-                    cvUploaded ? "border-success bg-success/5" : "border-border hover:border-primary"
-                  }`}
-                  onClick={() => setCvUploaded(true)}
-                >
-                  <Upload className={`h-10 w-10 mx-auto mb-3 ${cvUploaded ? "text-success" : "text-muted-foreground"}`} />
-                  <p className="font-medium">{cvUploaded ? "CV Uploaded!" : "Upload your CV"}</p>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {cvUploaded ? "resume_2024.pdf" : "PDF, DOC, or DOCX (max 5MB)"}
-                  </p>
-                </div>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  className="hidden"
+                />
+                
+                {cvFileName ? (
+                  <div className="flex items-center justify-between p-4 rounded-xl border border-success bg-success/5">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-lg bg-success">
+                        <CheckCircle className="h-5 w-5 text-success-foreground" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-success">Resume Uploaded</p>
+                        <p className="text-sm text-muted-foreground flex items-center gap-1">
+                          <FileText className="h-3 w-3" />
+                          {cvFileName.length > 30 ? cvFileName.substring(0, 30) + '...' : cvFileName}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                      >
+                        {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Replace"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleDeleteResume}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => !uploading && fileInputRef.current?.click()}
+                    className="relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer border-border hover:border-primary"
+                  >
+                    {uploading ? (
+                      <Loader2 className="h-10 w-10 mx-auto mb-3 text-primary animate-spin" />
+                    ) : (
+                      <Upload className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
+                    )}
+                    <p className="font-medium">
+                      {uploading ? "Uploading..." : "Upload your CV/Resume"}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      PDF, DOC, or DOCX (max 5MB)
+                    </p>
+                  </div>
+                )}
 
                 {/* Basic Info */}
                 <div className="grid gap-4">
