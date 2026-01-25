@@ -1,9 +1,12 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { X, CheckCircle, Sparkles, Building2, MapPin, DollarSign } from "lucide-react";
+import { X, CheckCircle, Sparkles, Building2, MapPin, DollarSign, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Job } from "@/types/job";
 import { useState } from "react";
+import { toast } from "sonner";
 
 interface ApplyModalProps {
   job: Job | null;
@@ -15,13 +18,52 @@ interface ApplyModalProps {
 export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps) {
   const [autoApplySimilar, setAutoApplySimilar] = useState(true);
   const [isApplied, setIsApplied] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    email: "",
+    phone: "",
+    coverLetter: "",
+  });
 
-  const handleApply = () => {
-    setIsApplied(true);
-    setTimeout(() => {
-      onConfirm(autoApplySimilar);
-      setIsApplied(false);
-    }, 1500);
+  const handleApply = async () => {
+    if (!formData.email || !formData.phone) {
+      toast.error("Please fill in all fields");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // Send email confirmation to company
+      const response = await fetch("/api/send-application-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobId: job?.id,
+          jobTitle: job?.title,
+          company: job?.company,
+          companyEmail: job?.website, // Use website field for company contact
+          applicantEmail: formData.email,
+          applicantPhone: formData.phone,
+          coverLetter: formData.coverLetter,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to send application");
+
+      setIsApplied(true);
+      setTimeout(() => {
+        onConfirm(autoApplySimilar);
+        setIsApplied(false);
+        setFormData({ email: "", phone: "", coverLetter: "" });
+      }, 1500);
+
+      toast.success("Application sent! Check your email for confirmation.");
+    } catch (error) {
+      toast.error("Failed to send application. Please try again.");
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (!job) return null;
@@ -41,7 +83,7 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-card p-6 shadow-xl"
+            className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-card p-6 shadow-xl max-h-[90vh] overflow-y-auto"
           >
             {isApplied ? (
               <motion.div
@@ -59,6 +101,9 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
                 </motion.div>
                 <h3 className="font-display text-xl font-semibold">Application Sent!</h3>
                 <p className="mt-2 text-muted-foreground">
+                  Confirmation email has been sent to <strong>{formData.email}</strong>
+                </p>
+                <p className="mt-3 text-sm text-muted-foreground">
                   {autoApplySimilar
                     ? "We'll auto-apply to similar roles for you."
                     : "Good luck with your application!"}
@@ -100,6 +145,51 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
                     </div>
                   </div>
 
+                  {/* Application Form */}
+                  <div className="space-y-4 p-4 rounded-xl bg-muted/30 border">
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Email Address</label>
+                      <div className="flex gap-2">
+                        <Mail className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-2" />
+                        <Input
+                          type="email"
+                          placeholder="your.email@example.com"
+                          value={formData.email}
+                          onChange={(e) =>
+                            setFormData({ ...formData, email: e.target.value })
+                          }
+                          disabled={isLoading}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Phone Number</label>
+                      <Input
+                        type="tel"
+                        placeholder="+1 (555) 000-0000"
+                        value={formData.phone}
+                        onChange={(e) =>
+                          setFormData({ ...formData, phone: e.target.value })
+                        }
+                        disabled={isLoading}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Cover Letter (Optional)</label>
+                      <Textarea
+                        placeholder="Tell the company why you're interested in this role..."
+                        value={formData.coverLetter}
+                        onChange={(e) =>
+                          setFormData({ ...formData, coverLetter: e.target.value })
+                        }
+                        disabled={isLoading}
+                        className="min-h-[120px] resize-none"
+                      />
+                    </div>
+                  </div>
+
                   {/* Auto-apply toggle */}
                   <motion.div
                     whileHover={{ scale: 1.02 }}
@@ -135,11 +225,11 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
                   </motion.div>
 
                   <div className="flex gap-3">
-                    <Button variant="outline" className="flex-1" onClick={onClose}>
+                    <Button variant="outline" className="flex-1" onClick={onClose} disabled={isLoading}>
                       Cancel
                     </Button>
-                    <Button variant="hero" className="flex-1" onClick={handleApply}>
-                      Apply Now
+                    <Button variant="hero" className="flex-1" onClick={handleApply} disabled={isLoading}>
+                      {isLoading ? "Sending..." : "Apply Now"}
                     </Button>
                   </div>
                 </div>

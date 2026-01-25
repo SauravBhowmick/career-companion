@@ -10,6 +10,7 @@ export interface Job {
   requirements: string[];
   tags: string[];
   postedAt: string;
+  website?: string;
   isNew?: boolean;
   isFeatured?: boolean;
   matchScore?: number;
