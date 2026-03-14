@@ -5,31 +5,53 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 MB
+const TEXT_TARGET_LENGTH = 15_000;
+
 /**
  * Best-effort PDF text extraction using raw BT/ET operator parsing.
  * Limitations: will not extract text from compressed streams (FlateDecode),
  * CID-keyed fonts, XObject forms, or scanned/image-only PDFs. For production
  * use with complex PDFs, consider integrating a full parser (e.g. pdf-parse
  * or pdfjs-dist). Returns empty string when no text is recoverable.
+ *
+ * Safety: rejects buffers larger than MAX_PDF_BYTES and stops scanning once
+ * TEXT_TARGET_LENGTH characters have been collected, since the downstream AI
+ * prompt is truncated to 15 000 chars anyway.
  */
 function extractTextFromPdf(buffer: ArrayBuffer): string {
+  if (buffer.byteLength > MAX_PDF_BYTES) {
+    throw new Error(
+      `PDF is too large (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB). ` +
+      `Maximum supported size is ${MAX_PDF_BYTES / 1024 / 1024} MB.`
+    );
+  }
+
   const bytes = new Uint8Array(buffer);
   const raw = new TextDecoder("latin1").decode(bytes);
 
   const textChunks: string[] = [];
+  let collectedLength = 0;
 
-  // Extract text between BT (Begin Text) and ET (End Text) operators
   const btEtRegex = /BT\s([\s\S]*?)ET/g;
   let match;
   while ((match = btEtRegex.exec(raw)) !== null) {
+    if (collectedLength >= TEXT_TARGET_LENGTH) break;
+
     const block = match[1];
-    // Extract string literals in parentheses
+
     const parenRegex = /\(([^)]*)\)/g;
     let pm;
     while ((pm = parenRegex.exec(block)) !== null) {
-      if (pm[1].trim()) textChunks.push(pm[1]);
+      const chunk = pm[1].trim();
+      if (chunk) {
+        textChunks.push(chunk);
+        collectedLength += chunk.length;
+        if (collectedLength >= TEXT_TARGET_LENGTH) break;
+      }
     }
-    // Extract hex strings
+    if (collectedLength >= TEXT_TARGET_LENGTH) break;
+
     const hexRegex = /<([0-9A-Fa-f]+)>/g;
     let hm;
     while ((hm = hexRegex.exec(block)) !== null) {
@@ -39,18 +61,26 @@ function extractTextFromPdf(buffer: ArrayBuffer): string {
         const charCode = parseInt(hex.substring(i, i + 2), 16);
         if (charCode >= 32 && charCode < 127) decoded += String.fromCharCode(charCode);
       }
-      if (decoded.trim()) textChunks.push(decoded);
+      const chunk = decoded.trim();
+      if (chunk) {
+        textChunks.push(chunk);
+        collectedLength += chunk.length;
+        if (collectedLength >= TEXT_TARGET_LENGTH) break;
+      }
     }
   }
 
   if (textChunks.length > 0) {
-    return textChunks.join(" ").replace(/\s+/g, " ").trim();
+    return textChunks.join(" ").replace(/\s+/g, " ").trim().substring(0, TEXT_TARGET_LENGTH);
   }
 
-  // Fallback: extract any printable ASCII sequences
-  const printable = raw.replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s+/g, " ").trim();
+  // Fallback: scan for printable ASCII words, but only up to a bounded slice
+  // to avoid O(n) replacement over the full multi-MB string.
+  const scanLimit = Math.min(raw.length, 500_000);
+  const slice = raw.substring(0, scanLimit);
+  const printable = slice.replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s+/g, " ").trim();
   const words = printable.split(" ").filter((w) => w.length > 2);
-  return words.join(" ").substring(0, 15000);
+  return words.join(" ").substring(0, TEXT_TARGET_LENGTH);
 }
 
 Deno.serve(async (req) => {
