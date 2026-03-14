@@ -66,6 +66,69 @@ async function searchFirecrawl(
   return data.data || [];
 }
 
+const AGGREGATOR_HOSTS = new Set([
+  'linkedin.com', 'indeed.com', 'glassdoor.com', 'glassdoor.de',
+  'stepstone.de', 'stepstone.com', 'heyjobs.co', 'xing.com',
+  'monster.com', 'ziprecruiter.com', 'dice.com', 'reed.co.uk',
+  'seek.com.au', 'totaljobs.com', 'cwjobs.co.uk',
+]);
+
+function isAggregatorHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^www\./, '');
+  for (const agg of AGGREGATOR_HOSTS) {
+    if (h === agg || h.endsWith(`.${agg}`)) return true;
+  }
+  return false;
+}
+
+function extractCompanyFromContent(markdown: string): string | null {
+  const ogMatch = markdown.match(/(?:company|employer|hiring|organization)[:\s]+["']?([A-Za-zÀ-ÿ0-9&\s.,'-]+?)["']?(?:\s*[|\-–·]|\n|$)/i);
+  if (ogMatch) {
+    const name = ogMatch[1].trim();
+    if (name.length >= 2 && name.length <= 80) return name;
+  }
+
+  const atMatch = markdown.match(/(?:^|\n)\s*(?:at|@)\s+([A-Z][A-Za-zÀ-ÿ0-9&\s.,'-]+?)(?:\s*[|\-–·]|\n|$)/m);
+  if (atMatch) {
+    const name = atMatch[1].trim();
+    if (name.length >= 2 && name.length <= 80) return name;
+  }
+
+  return null;
+}
+
+function tryParsePostedDate(markdown: string): string | undefined {
+  const patterns = [
+    /(?:posted|published|date)[:\s]+(\d{4}-\d{2}-\d{2})/i,
+    /(?:posted|published)[:\s]+(\w+\s+\d{1,2},?\s+\d{4})/i,
+    /(?:posted|published)[:\s]+(\d{1,2}\s+\w+\s+\d{4})/i,
+    /(\d{1,2})\s+(hours?|days?|weeks?)\s+ago/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = markdown.match(pattern);
+    if (!match) continue;
+
+    const relativeMatch = match[0].match(/(\d{1,2})\s+(hours?|days?|weeks?)\s+ago/i);
+    if (relativeMatch) {
+      const n = parseInt(relativeMatch[1], 10);
+      const unit = relativeMatch[2].toLowerCase();
+      const now = new Date();
+      if (unit.startsWith('hour')) now.setHours(now.getHours() - n);
+      else if (unit.startsWith('day')) now.setDate(now.getDate() - n);
+      else if (unit.startsWith('week')) now.setDate(now.getDate() - n * 7);
+      return now.toISOString();
+    }
+
+    const parsed = new Date(match[1]);
+    if (!isNaN(parsed.getTime()) && parsed.getTime() > Date.now() - 365 * 24 * 60 * 60 * 1000) {
+      return parsed.toISOString();
+    }
+  }
+
+  return undefined;
+}
+
 function parseJobFromResult(
   result: any,
   index: number,
@@ -80,10 +143,15 @@ function parseJobFromResult(
   let company = 'Company';
   const urlMatch = url.match(/https?:\/\/(?:www\.)?([^\/]+)/);
   if (urlMatch) {
-    company = urlMatch[1]
-      .replace('.com', '').replace('.io', '').replace('.de', '')
-      .replace('.co', '').replace('careers.', '').replace('jobs.', '');
-    company = company.charAt(0).toUpperCase() + company.slice(1);
+    const hostname = urlMatch[1];
+    if (isAggregatorHost(hostname)) {
+      company = extractCompanyFromContent(markdown) || 'Company';
+    } else {
+      company = hostname
+        .replace('.com', '').replace('.io', '').replace('.de', '')
+        .replace('.co', '').replace('careers.', '').replace('jobs.', '');
+      company = company.charAt(0).toUpperCase() + company.slice(1);
+    }
   }
 
   let salary: string | undefined;
@@ -125,7 +193,9 @@ function parseJobFromResult(
     return null;
   }
 
-  return {
+  const postedAt = tryParsePostedDate(markdown);
+
+  const job: JobListing = {
     id: `job-${Date.now()}-${index}`,
     title: cleanTitle,
     company,
@@ -134,9 +204,12 @@ function parseJobFromResult(
     type,
     description: markdown.substring(0, 500),
     url,
-    postedAt: new Date().toISOString(),
     source: detectSource(url),
   };
+
+  if (postedAt) job.postedAt = postedAt;
+
+  return job;
 }
 
 Deno.serve(async (req) => {

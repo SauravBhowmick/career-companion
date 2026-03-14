@@ -22,7 +22,7 @@ import { toast } from "sonner";
 const Index = () => {
   const { user } = useAuth();
   const { applyToJob, saveJob, isJobSaved, applications } = useJobApplications();
-  const { jobs: realJobs, loading: loadingRealJobs, fetchJobs } = useRealJobs();
+  const { jobs: realJobs, loading: loadingRealJobs, sources: jobSources, fetchJobs } = useRealJobs();
   const { matchJobs, matching } = useJobMatcher();
   const [matchedJobs, setMatchedJobs] = useState<Job[]>([]);
   
@@ -41,9 +41,15 @@ const Index = () => {
   const matchVersionRef = useRef(0);
   const pendingMatchRef = useRef<{ jobs: Job[]; key: string } | null>(null);
   const inFlightRef = useRef(false);
+  const skipNextEffectRef = useRef(false);
 
   useEffect(() => {
     if (!useRealData) return;
+
+    if (skipNextEffectRef.current) {
+      skipNextEffectRef.current = false;
+      return;
+    }
     
     const timeoutId = setTimeout(() => {
       fetchJobs({
@@ -107,6 +113,9 @@ const Index = () => {
 
   const handleFetchRealJobs = () => {
     const isRefresh = useRealData;
+    if (!isRefresh) {
+      skipNextEffectRef.current = true;
+    }
     setUseRealData(true);
     fetchJobs({
       query: searchQuery || 'software developer',
@@ -231,7 +240,7 @@ const Index = () => {
                   {useRealData ? "Live Job Results" : searchQuery ? `Results for "${searchQuery}"` : "Recommended for You"}
                 </h2>
                 <p className="text-muted-foreground mt-1">
-                  {filteredJobs.length} jobs found {useRealData && "• LinkedIn · Indeed · StepStone · HeyJobs · Xing"}
+                  {filteredJobs.length} jobs found {useRealData && jobSources.length > 0 && `• ${jobSources.join(" · ")}`}
                 </p>
               </div>
               <div className="flex gap-2">

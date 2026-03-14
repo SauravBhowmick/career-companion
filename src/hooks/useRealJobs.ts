@@ -14,6 +14,7 @@ export function useRealJobs() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sources, setSources] = useState<string[]>([]);
   // TODO: supabase.functions.invoke does not support AbortSignal yet —
   // revisit when https://github.com/supabase/supabase-js/issues/797 lands.
   const cacheRef = useRef<Map<string, { jobs: Job[]; ts: number }>>(new Map());
@@ -50,6 +51,8 @@ export function useRealJobs() {
         toast.warning(data.warnings);
       }
 
+      setSources(data.sources || []);
+
       const transformedJobs: Job[] = data.jobs.map((job: any) => ({
         id: job.id,
         title: job.title,
@@ -84,6 +87,7 @@ export function useRealJobs() {
     jobs,
     loading,
     error,
+    sources,
     fetchJobs,
   };
 }
