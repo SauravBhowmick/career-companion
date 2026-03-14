@@ -16,6 +16,9 @@ interface JobListing {
   source?: string;
 }
 
+// Per-board limits: General gets the largest share (8) for broad coverage,
+// while targeted board searches get 5 each. Total ≈18 raw results before
+// dedup; after dedup + filtering, typically 10-15 unique jobs are returned.
 const JOB_BOARD_SEARCHES = [
   { label: "General",   sites: null,                                           limit: 8 },
   { label: "LinkedIn + Indeed", sites: "site:linkedin.com/jobs OR site:indeed.com", limit: 5 },
@@ -62,8 +65,21 @@ async function searchFirecrawl(
     );
   }
 
-  const data = await response.json();
-  return data.data || [];
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    const raw = await response.text().catch(() => '');
+    throw new Error(
+      `Firecrawl ${response.status}: malformed JSON – ${raw.substring(0, 200)}`
+    );
+  }
+
+  if (typeof data !== 'object' || data === null || !Array.isArray(data.data)) {
+    return [];
+  }
+
+  return data.data;
 }
 
 const AGGREGATOR_HOSTS = new Set([
@@ -82,13 +98,17 @@ function isAggregatorHost(hostname: string): boolean {
 }
 
 function extractCompanyFromContent(markdown: string): string | null {
-  const ogMatch = markdown.match(/(?:company|employer|hiring|organization)[:\s]+["']?([A-Za-zÀ-ÿ0-9&\s.,'-]+?)["']?(?:\s*[|\-–·]|\n|$)/i);
-  if (ogMatch) {
-    const name = ogMatch[1].trim();
+  const kwMatch = markdown.match(
+    /(?:company|employer|organization)\b[:\s]+["']?([A-Za-zÀ-ÿ0-9&\s.,'-]+?)["']?(?=\s+(?:is|are|hiring|seeking|looking)\b|\s*[|\-–·,;]|\n|$)/i
+  );
+  if (kwMatch) {
+    const name = kwMatch[1].trim();
     if (name.length >= 2 && name.length <= 80) return name;
   }
 
-  const atMatch = markdown.match(/(?:^|\n)\s*(?:at|@)\s+([A-Z][A-Za-zÀ-ÿ0-9&\s.,'-]+?)(?:\s*[|\-–·]|\n|$)/m);
+  const atMatch = markdown.match(
+    /(?:^|\n)\s*(?:at|@)\s+([A-Z][A-Za-zÀ-ÿ0-9&.,'-]+(?:\s+[A-Z][A-Za-zÀ-ÿ0-9&.,'-]*)*)(?=\s+(?:is|are|hiring|seeking|looking|we)\b|\s*[|\-–·,;]|\n|$)/m
+  );
   if (atMatch) {
     const name = atMatch[1].trim();
     if (name.length >= 2 && name.length <= 80) return name;
@@ -121,7 +141,8 @@ function tryParsePostedDate(markdown: string): string | undefined {
     }
 
     const parsed = new Date(match[1]);
-    if (!isNaN(parsed.getTime()) && parsed.getTime() > Date.now() - 365 * 24 * 60 * 60 * 1000) {
+    const ts = parsed.getTime();
+    if (!isNaN(ts) && ts <= Date.now() && ts > Date.now() - 365 * 24 * 60 * 60 * 1000) {
       return parsed.toISOString();
     }
   }
@@ -129,10 +150,37 @@ function tryParsePostedDate(markdown: string): string | undefined {
   return undefined;
 }
 
+const CCTLDS = new Set([
+  'co.uk', 'co.in', 'co.jp', 'co.kr', 'co.nz', 'co.za', 'co.id',
+  'com.au', 'com.br', 'com.cn', 'com.mx', 'com.sg', 'com.hk',
+  'org.uk', 'net.au', 'ac.uk',
+]);
+
+function extractSLD(hostname: string): string {
+  const labels = hostname.toLowerCase().replace(/^(www|careers|jobs)\./, '').split('.');
+  const skipPrefixes = ['careers', 'jobs', 'career', 'job', 'apply', 'hire'];
+  while (labels.length > 1 && skipPrefixes.includes(labels[0])) {
+    labels.shift();
+  }
+
+  if (labels.length < 2) {
+    const name = labels[0] || 'Company';
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  const lastTwo = labels.slice(-2).join('.');
+  const sld = CCTLDS.has(lastTwo) && labels.length >= 3
+    ? labels[labels.length - 3]
+    : labels[labels.length - 2];
+
+  return sld.charAt(0).toUpperCase() + sld.slice(1);
+}
+
 function parseJobFromResult(
   result: any,
   index: number,
   fallbackLocation: string | undefined,
+  batchTs: number,
 ): JobListing | null {
   const title = result.title || 'Job Position';
   const url = result.url || '';
@@ -147,10 +195,7 @@ function parseJobFromResult(
     if (isAggregatorHost(hostname)) {
       company = extractCompanyFromContent(markdown) || 'Company';
     } else {
-      company = hostname
-        .replace('.com', '').replace('.io', '').replace('.de', '')
-        .replace('.co', '').replace('careers.', '').replace('jobs.', '');
-      company = company.charAt(0).toUpperCase() + company.slice(1);
+      company = extractSLD(hostname);
     }
   }
 
@@ -196,7 +241,7 @@ function parseJobFromResult(
   const postedAt = tryParsePostedDate(markdown);
 
   const job: JobListing = {
-    id: `job-${Date.now()}-${index}`,
+    id: `job-${batchTs}-${index}`,
     title: cleanTitle,
     company,
     location: jobLocation,
@@ -302,13 +347,14 @@ Deno.serve(async (req) => {
       console.log(`Aggregated ${allResults.length} unique results from ${JOB_BOARD_SEARCHES.length} searches (${searchErrors.length} failed)`);
 
       let idCounter = 0;
+      const batchTs = Date.now();
       const jobs: JobListing[] = allResults
-        .map((result) => parseJobFromResult(result, idCounter++, location))
+        .map((result) => parseJobFromResult(result, idCounter++, location, batchTs))
         .filter((j): j is JobListing => j !== null);
 
       console.log('Parsed', jobs.length, 'valid job listings');
 
-      const sources = [...new Set(jobs.map((j) => j.source))];
+      const sources = [...new Set(jobs.map((j) => j.source).filter((s): s is string => !!s))];
 
       return new Response(
         JSON.stringify({

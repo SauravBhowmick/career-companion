@@ -17,16 +17,19 @@ export function useRealJobs() {
   const [sources, setSources] = useState<string[]>([]);
   // TODO: supabase.functions.invoke does not support AbortSignal yet —
   // revisit when https://github.com/supabase/supabase-js/issues/797 lands.
-  const cacheRef = useRef<Map<string, { jobs: Job[]; ts: number }>>(new Map());
+  const cacheRef = useRef<Map<string, { jobs: Job[]; sources: string[]; ts: number }>>(new Map());
 
   const fetchJobs = useCallback(async (options: FetchJobsOptions = {}) => {
     const { forceRefresh, ...searchParams } = options;
     const cacheKey = JSON.stringify(searchParams);
 
-    if (!forceRefresh) {
+    if (forceRefresh) {
+      cacheRef.current.delete(cacheKey);
+    } else {
       const cached = cacheRef.current.get(cacheKey);
       if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
         setJobs(cached.jobs);
+        setSources(cached.sources);
         return cached.jobs;
       }
     }
@@ -51,8 +54,6 @@ export function useRealJobs() {
         toast.warning(data.warnings);
       }
 
-      setSources(data.sources || []);
-
       const transformedJobs: Job[] = data.jobs.map((job: any) => ({
         id: job.id,
         title: job.title,
@@ -70,8 +71,10 @@ export function useRealJobs() {
         source: job.source,
       }));
 
+      const fetchedSources: string[] = data.sources || [];
       setJobs(transformedJobs);
-      cacheRef.current.set(cacheKey, { jobs: transformedJobs, ts: Date.now() });
+      setSources(fetchedSources);
+      cacheRef.current.set(cacheKey, { jobs: transformedJobs, sources: fetchedSources, ts: Date.now() });
       return transformedJobs;
     } catch (err: any) {
       const message = err.message || 'Failed to fetch jobs';
