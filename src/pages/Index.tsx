@@ -106,11 +106,13 @@ const Index = () => {
   }, [currentJobs, user, runMatch]);
 
   const handleFetchRealJobs = () => {
+    const isRefresh = useRealData;
     setUseRealData(true);
     fetchJobs({
       query: searchQuery || 'software developer',
       location: filters.locations[0],
       jobType: filters.jobTypes[0],
+      forceRefresh: isRefresh,
     });
   };
 
@@ -229,7 +231,7 @@ const Index = () => {
                   {useRealData ? "Live Job Results" : searchQuery ? `Results for "${searchQuery}"` : "Recommended for You"}
                 </h2>
                 <p className="text-muted-foreground mt-1">
-                  {filteredJobs.length} jobs found {useRealData && "• Powered by Firecrawl"}
+                  {filteredJobs.length} jobs found {useRealData && "• LinkedIn · Indeed · StepStone · HeyJobs · Xing"}
                 </p>
               </div>
               <div className="flex gap-2">

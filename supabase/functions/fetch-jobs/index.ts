@@ -13,6 +13,122 @@ interface JobListing {
   description?: string;
   url?: string;
   postedAt?: string;
+  source?: string;
+}
+
+const JOB_BOARD_SEARCHES = [
+  { label: "General",   sites: null,                                           limit: 8 },
+  { label: "LinkedIn + Indeed", sites: "site:linkedin.com/jobs OR site:indeed.com", limit: 5 },
+  { label: "EU Boards", sites: "site:stepstone.de OR site:heyjobs.co OR site:xing.com", limit: 5 },
+];
+
+function detectSource(url: string): string {
+  const host = url.toLowerCase();
+  if (host.includes("linkedin.com"))  return "LinkedIn";
+  if (host.includes("indeed.com"))    return "Indeed";
+  if (host.includes("stepstone"))     return "StepStone";
+  if (host.includes("heyjobs"))       return "HeyJobs";
+  if (host.includes("xing.com"))      return "Xing";
+  if (host.includes("glassdoor"))     return "Glassdoor";
+  return "Web";
+}
+
+async function searchFirecrawl(
+  apiKey: string,
+  searchQuery: string,
+  limit: number,
+  signal: AbortSignal,
+): Promise<any[]> {
+  const response = await fetch('https://api.firecrawl.dev/v1/search', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: searchQuery,
+      limit,
+      lang: 'en',
+      tbs: 'qdr:w',
+      scrapeOptions: { formats: ['markdown'] },
+    }),
+    signal,
+  });
+
+  if (!response.ok) return [];
+  const data = await response.json();
+  return data.data || [];
+}
+
+function parseJobFromResult(
+  result: any,
+  index: number,
+  fallbackLocation: string | undefined,
+): JobListing | null {
+  const title = result.title || 'Job Position';
+  const url = result.url || '';
+  const markdown = result.markdown || result.description || '';
+
+  let company = 'Company';
+  const urlMatch = url.match(/https?:\/\/(?:www\.)?([^\/]+)/);
+  if (urlMatch) {
+    company = urlMatch[1]
+      .replace('.com', '').replace('.io', '').replace('.de', '')
+      .replace('.co', '').replace('careers.', '').replace('jobs.', '');
+    company = company.charAt(0).toUpperCase() + company.slice(1);
+  }
+
+  let salary: string | undefined;
+  const salaryMatch =
+    markdown.match(/\$[\d,]+\s*[-–]\s*\$[\d,]+(?:\s*(?:\/yr|\/year|annually|per year))?/i) ||
+    markdown.match(/€[\d.,]+\s*[-–]\s*€[\d.,]+/i) ||
+    markdown.match(/\$[\d,]+(?:\s*(?:\/yr|\/year|annually|per year|k))/i);
+  if (salaryMatch) salary = salaryMatch[0];
+
+  let type = 'Full-time';
+  const lower = markdown.toLowerCase();
+  if (lower.includes('remote')) type = 'Remote';
+  else if (lower.includes('hybrid')) type = 'Hybrid';
+  else if (lower.includes('part-time') || lower.includes('part time')) type = 'Part-time';
+  else if (lower.includes('contract')) type = 'Contract';
+
+  let jobLocation = fallbackLocation || 'Unknown';
+  const locationPatterns = [
+    /(?:location|based in|located in|office in|standort)[:\s]+([A-Za-zÀ-ÿ\s,]+?)(?:\.|,|$)/i,
+    /([A-Za-zÀ-ÿ\s]+,\s*[A-Z]{2})/,
+    /([A-Za-zÀ-ÿ\s]+,\s*(?:Germany|Deutschland|France|Netherlands|Ireland|Spain|Italy|Sweden|Poland|Austria))/i,
+  ];
+  for (const pattern of locationPatterns) {
+    const match = markdown.match(pattern);
+    if (match) {
+      jobLocation = match[1].trim();
+      break;
+    }
+  }
+
+  const cleanTitle = title.replace(/\s+[-|]\s+.*$/, '').trim().substring(0, 100);
+
+  if (
+    !cleanTitle ||
+    cleanTitle.toLowerCase() === 'job position' ||
+    cleanTitle.toLowerCase().includes('sign in') ||
+    cleanTitle.toLowerCase().includes('log in')
+  ) {
+    return null;
+  }
+
+  return {
+    id: `job-${Date.now()}-${index}`,
+    title: cleanTitle,
+    company,
+    location: jobLocation,
+    salary,
+    type,
+    description: markdown.substring(0, 500),
+    url,
+    postedAt: new Date().toISOString(),
+    source: detectSource(url),
+  };
 }
 
 Deno.serve(async (req) => {
@@ -32,40 +148,66 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Build search query for job listings
     const searchTerms = [];
     if (query) searchTerms.push(query);
     if (location) searchTerms.push(location);
     if (jobType) searchTerms.push(jobType);
-    
+
     const currentYear = new Date().getFullYear();
-    const searchQuery = `${searchTerms.join(' ')} jobs hiring ${currentYear}`;
-    
-    console.log('Searching for jobs:', searchQuery);
+    const baseQuery = `${searchTerms.join(' ')} jobs hiring ${currentYear}`;
+
+    console.log('Searching for jobs across platforms:', baseQuery);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-    let response: Response;
     try {
-      response = await fetch('https://api.firecrawl.dev/v1/search', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: searchQuery,
-          limit: 15,
-          lang: 'en',
-          country: 'us',
-          tbs: 'qdr:w',
-          scrapeOptions: {
-            formats: ['markdown'],
-          },
-        }),
-        signal: controller.signal,
+      // Fire parallel searches across job boards
+      const searchPromises = JOB_BOARD_SEARCHES.map((board) => {
+        const fullQuery = board.sites ? `${baseQuery} ${board.sites}` : baseQuery;
+        return searchFirecrawl(apiKey, fullQuery, board.limit, controller.signal)
+          .catch((err) => {
+            if (err.name === 'AbortError') throw err;
+            console.error(`Search failed for ${board.label}:`, err.message);
+            return [] as any[];
+          });
       });
+
+      const searchResults = await Promise.all(searchPromises);
+
+      // Flatten and deduplicate by URL
+      const seenUrls = new Set<string>();
+      const allResults: any[] = [];
+      for (const results of searchResults) {
+        for (const r of results) {
+          const url = (r.url || '').toLowerCase();
+          if (url && seenUrls.has(url)) continue;
+          if (url) seenUrls.add(url);
+          allResults.push(r);
+        }
+      }
+
+      console.log(`Aggregated ${allResults.length} unique results from ${JOB_BOARD_SEARCHES.length} searches`);
+
+      let idCounter = 0;
+      const jobs: JobListing[] = allResults
+        .map((result) => parseJobFromResult(result, idCounter++, location))
+        .filter((j): j is JobListing => j !== null);
+
+      console.log('Parsed', jobs.length, 'valid job listings');
+
+      const sources = [...new Set(jobs.map((j) => j.source))];
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          jobs,
+          query: baseQuery,
+          total: jobs.length,
+          sources,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     } catch (err: any) {
       if (err.name === 'AbortError') {
         return new Response(
@@ -77,91 +219,6 @@ Deno.serve(async (req) => {
     } finally {
       clearTimeout(timeoutId);
     }
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error('Firecrawl API error:', data);
-      return new Response(
-        JSON.stringify({ success: false, error: data.error || `Search failed with status ${response.status}` }),
-        { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log('Search returned', data.data?.length || 0, 'results');
-
-    // Parse job listings from search results
-    const jobs: JobListing[] = (data.data || []).map((result: any, index: number) => {
-      const title = result.title || 'Job Position';
-      const url = result.url || '';
-      const markdown = result.markdown || result.description || '';
-      
-      // Extract company name from URL or title
-      let company = 'Company';
-      const urlMatch = url.match(/https?:\/\/(?:www\.)?([^\/]+)/);
-      if (urlMatch) {
-        company = urlMatch[1].replace('.com', '').replace('.io', '').replace('careers.', '').replace('jobs.', '');
-        company = company.charAt(0).toUpperCase() + company.slice(1);
-      }
-      
-      // Try to extract salary from markdown
-      let salary: string | undefined;
-      const salaryMatch = markdown.match(/\$[\d,]+\s*[-–]\s*\$[\d,]+(?:\s*(?:\/yr|\/year|annually|per year))?/i) ||
-                         markdown.match(/\$[\d,]+(?:\s*(?:\/yr|\/year|annually|per year|k))/i);
-      if (salaryMatch) {
-        salary = salaryMatch[0];
-      }
-      
-      // Extract job type
-      let type = 'Full-time';
-      if (markdown.toLowerCase().includes('remote')) type = 'Remote';
-      else if (markdown.toLowerCase().includes('hybrid')) type = 'Hybrid';
-      else if (markdown.toLowerCase().includes('part-time') || markdown.toLowerCase().includes('part time')) type = 'Part-time';
-      else if (markdown.toLowerCase().includes('contract')) type = 'Contract';
-      
-      // Extract location
-      let jobLocation = location || 'Remote';
-      const locationPatterns = [
-        /(?:location|based in|located in|office in)[:\s]+([A-Za-z\s,]+?)(?:\.|,|$)/i,
-        /([A-Za-z\s]+,\s*[A-Z]{2})/,
-      ];
-      for (const pattern of locationPatterns) {
-        const match = markdown.match(pattern);
-        if (match) {
-          jobLocation = match[1].trim();
-          break;
-        }
-      }
-      
-      return {
-        id: `job-${Date.now()}-${index}`,
-        title: title.replace(/\s*[-|]\s*.*$/, '').trim().substring(0, 100),
-        company,
-        location: jobLocation,
-        salary,
-        type,
-        description: markdown.substring(0, 500),
-        url,
-        postedAt: new Date().toISOString(),
-      };
-    }).filter((job: JobListing) => 
-      job.title && 
-      job.title.toLowerCase() !== 'job position' &&
-      !job.title.toLowerCase().includes('sign in') &&
-      !job.title.toLowerCase().includes('log in')
-    );
-
-    console.log('Parsed', jobs.length, 'valid job listings');
-
-    return new Response(
-      JSON.stringify({ 
-        success: true, 
-        jobs,
-        query: searchQuery,
-        total: jobs.length 
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
   } catch (error) {
     console.error('Error fetching jobs:', error);
     const errorMessage = error instanceof Error ? error.message : 'Failed to fetch jobs';

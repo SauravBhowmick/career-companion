@@ -11,6 +11,7 @@ export interface Job {
   tags: string[];
   postedAt: string;
   website?: string;
+  source?: string;
   isNew?: boolean;
   isFeatured?: boolean;
   matchScore?: number;

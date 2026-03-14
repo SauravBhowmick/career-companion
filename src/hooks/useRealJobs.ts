@@ -7,6 +7,7 @@ interface FetchJobsOptions {
   query?: string;
   location?: string;
   jobType?: string;
+  forceRefresh?: boolean;
 }
 
 export function useRealJobs() {
@@ -18,11 +19,15 @@ export function useRealJobs() {
   const cacheRef = useRef<Map<string, { jobs: Job[]; ts: number }>>(new Map());
 
   const fetchJobs = useCallback(async (options: FetchJobsOptions = {}) => {
-    const cacheKey = JSON.stringify(options);
-    const cached = cacheRef.current.get(cacheKey);
-    if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
-      setJobs(cached.jobs);
-      return cached.jobs;
+    const { forceRefresh, ...searchParams } = options;
+    const cacheKey = JSON.stringify(searchParams);
+
+    if (!forceRefresh) {
+      const cached = cacheRef.current.get(cacheKey);
+      if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+        setJobs(cached.jobs);
+        return cached.jobs;
+      }
     }
 
     setLoading(true);
@@ -30,7 +35,7 @@ export function useRealJobs() {
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke('fetch-jobs', {
-        body: options,
+        body: searchParams,
       });
 
       if (fnError) {
@@ -55,6 +60,7 @@ export function useRealJobs() {
         description: job.description || '',
         requirements: [],
         website: job.url,
+        source: job.source,
       }));
 
       setJobs(transformedJobs);

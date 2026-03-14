@@ -84,6 +84,11 @@ export function JobCard({ job, index, onApply, onSave, isSaved }: JobCardProps) 
             <Badge variant="secondary" className="text-xs">
               {job.type}
             </Badge>
+            {job.source && (
+              <Badge variant="outline" className="text-xs text-primary border-primary/30">
+                {job.source}
+              </Badge>
+            )}
             <div className="flex items-center gap-1 text-success font-medium">
               <DollarSign className="h-4 w-4" />
               <span>{job.salary}</span>
