@@ -15,19 +15,9 @@ interface ApplicationEmailRequest {
   coverLetter?: string;
 }
 
-const recentRequests = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 5;
-
-function isRateLimited(userId: string): boolean {
-  const now = Date.now();
-  const timestamps = recentRequests.get(userId) ?? [];
-  const recent = timestamps.filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
-  recentRequests.set(userId, recent);
-  if (recent.length >= RATE_LIMIT_MAX) return true;
-  recent.push(now);
-  return false;
-}
+const RATE_LIMIT_ACTION = "send_application_email";
 
 function escapeHtml(str: string): string {
   return str
@@ -71,8 +61,22 @@ Deno.serve(async (req) => {
       );
     }
 
-    // --- Rate limiting per user ---
-    if (isRateLimited(user.id)) {
+    // --- Rate limiting per user (persistent via Supabase) ---
+    const { data: rateLimited, error: rlError } = await supabase.rpc(
+      "check_rate_limit",
+      {
+        p_user_id: user.id,
+        p_action: RATE_LIMIT_ACTION,
+        p_window_ms: RATE_LIMIT_WINDOW_MS,
+        p_max_requests: RATE_LIMIT_MAX,
+      }
+    );
+
+    if (rlError) {
+      console.error("Rate-limit check failed:", rlError.message);
+    }
+
+    if (rateLimited === true) {
       return new Response(
         JSON.stringify({ error: "Too many requests. Please wait a minute before trying again." }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }

@@ -8,6 +8,15 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 interface JobAlertRequest {
   userId: string;
   jobs: {
@@ -57,11 +66,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
         (job) => `
         <tr>
           <td style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
-            <h3 style="margin: 0 0 4px 0; color: #111827; font-size: 16px;">${job.title}</h3>
-            <p style="margin: 0 0 4px 0; color: #6b7280; font-size: 14px;">${job.company}</p>
+            <h3 style="margin: 0 0 4px 0; color: #111827; font-size: 16px;">${escapeHtml(job.title)}</h3>
+            <p style="margin: 0 0 4px 0; color: #6b7280; font-size: 14px;">${escapeHtml(job.company)}</p>
             <p style="margin: 0; color: #9ca3af; font-size: 12px;">
-              ${job.location}${job.salary ? ` • ${job.salary}` : ""}
-              ${job.matchScore ? ` • ${job.matchScore}% match` : ""}
+              ${escapeHtml(job.location)}${job.salary ? ` &bull; ${escapeHtml(job.salary)}` : ""}
+              ${job.matchScore ? ` &bull; ${job.matchScore}% match` : ""}
             </p>
           </td>
         </tr>
@@ -96,7 +105,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
                 <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); padding: 32px; text-align: center;">
                   <h1 style="color: white; margin: 0; font-size: 24px;">New Jobs For You!</h1>
                   <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0;">
-                    Hi ${profile.full_name || "there"}, we found ${jobs.length} new job${jobs.length > 1 ? "s" : ""} matching your profile
+                    Hi ${escapeHtml(profile.full_name || "there")}, we found ${jobs.length} new job${jobs.length > 1 ? "s" : ""} matching your profile
                   </p>
                 </div>
                 <table style="width: 100%; border-collapse: collapse;">

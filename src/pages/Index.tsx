@@ -40,6 +40,7 @@ const Index = () => {
 
   const matchVersionRef = useRef(0);
   const pendingMatchRef = useRef<{ jobs: Job[]; key: string } | null>(null);
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
     if (!useRealData) return;
@@ -62,18 +63,29 @@ const Index = () => {
 
   const runMatch = useCallback(
     (jobs: Job[], key: string) => {
+      if (inFlightRef.current) {
+        pendingMatchRef.current = { jobs, key };
+        return;
+      }
+
+      inFlightRef.current = true;
       const version = ++matchVersionRef.current;
       pendingMatchRef.current = null;
 
-      matchJobs(jobs).then((result) => {
-        if (matchVersionRef.current !== version) return;
-        setMatchedJobs(result);
-
-        if (pendingMatchRef.current && pendingMatchRef.current.key !== key) {
-          const next = pendingMatchRef.current;
-          runMatch(next.jobs, next.key);
-        }
-      });
+      matchJobs(jobs)
+        .then((result) => {
+          if (matchVersionRef.current === version) {
+            setMatchedJobs(result);
+          }
+        })
+        .finally(() => {
+          inFlightRef.current = false;
+          if (pendingMatchRef.current) {
+            const next = pendingMatchRef.current;
+            pendingMatchRef.current = null;
+            runMatch(next.jobs, next.key);
+          }
+        });
     },
     [matchJobs]
   );
@@ -86,10 +98,6 @@ const Index = () => {
       pendingMatchRef.current = null;
       setMatchedJobs(currentJobs);
       return;
-    }
-
-    if (matchVersionRef.current > 0 && pendingMatchRef.current === null) {
-      pendingMatchRef.current = { jobs: currentJobs, key: jobsKey };
     }
 
     runMatch(currentJobs, jobsKey);

@@ -50,19 +50,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   return (
     <AnimatePresence>
       {isOpen && (
-        <>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+          onClick={onClose}
+        >
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
-            onClick={onClose}
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-card p-6 shadow-xl"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-2xl border bg-card p-6 shadow-xl max-h-[90vh] overflow-y-auto"
           >
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-display text-xl font-semibold">Auto-Apply Settings</h2>
@@ -78,7 +78,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             ) : (
               <div className="space-y-6">
                 {/* Auto Apply */}
-                <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
+                <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50 transition-colors duration-150 hover:bg-muted/80">
                   <div className="flex items-center gap-3">
                     <div className="p-2 rounded-lg gradient-primary">
                       <Zap className="h-5 w-5 text-primary-foreground" />
@@ -97,7 +97,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 {/* Match Threshold */}
-                <div className="p-4 rounded-xl bg-muted/50">
+                <div className="p-4 rounded-xl bg-muted/50 transition-colors duration-150 hover:bg-muted/80">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="p-2 rounded-lg bg-accent">
                       <Sliders className="h-5 w-5 text-accent-foreground" />
@@ -125,7 +125,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 {/* Email Notifications */}
-                <div className="p-4 rounded-xl bg-muted/50">
+                <div className="p-4 rounded-xl bg-muted/50 transition-colors duration-150 hover:bg-muted/80">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div className="p-2 rounded-lg bg-success">
@@ -162,7 +162,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 {/* Instant Notifications */}
-                <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
+                <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50 transition-colors duration-150 hover:bg-muted/80">
                   <div className="flex items-center gap-3">
                     <div className="p-2 rounded-lg bg-secondary">
                       <Shield className="h-5 w-5 text-secondary-foreground" />
@@ -186,7 +186,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </div>
             )}
           </motion.div>
-        </>
+        </motion.div>
       )}
     </AnimatePresence>
   );

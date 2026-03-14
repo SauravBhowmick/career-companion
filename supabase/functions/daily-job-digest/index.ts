@@ -187,7 +187,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
           }
 
           const matchingJobs = newJobs.filter(
-            (job) => (job.matchScore || 0) >= (userPref.match_threshold || 75)
+            (job) =>
+              job.matchScore === undefined ||
+              job.matchScore >= (userPref.match_threshold || 75)
           );
 
           if (matchingJobs.length === 0) {
