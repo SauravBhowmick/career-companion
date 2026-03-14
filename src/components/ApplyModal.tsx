@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Job } from "@/types/job";
 import { useState } from "react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface ApplyModalProps {
   job: Job | null;
@@ -33,22 +34,18 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
 
     setIsLoading(true);
     try {
-      // Send email confirmation to company
-      const response = await fetch("/api/send-application-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jobId: job?.id,
+      const { data, error } = await supabase.functions.invoke("send-application-email", {
+        body: {
           jobTitle: job?.title,
           company: job?.company,
-          companyEmail: job?.website, // Use website field for company contact
           applicantEmail: formData.email,
           applicantPhone: formData.phone,
           coverLetter: formData.coverLetter,
-        }),
+        },
       });
 
-      if (!response.ok) throw new Error("Failed to send application");
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
 
       setIsApplied(true);
       setTimeout(() => {

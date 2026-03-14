@@ -39,28 +39,45 @@ Deno.serve(async (req) => {
     if (location) searchTerms.push(location);
     if (jobType) searchTerms.push(jobType);
     
-    const searchQuery = `${searchTerms.join(' ')} jobs hiring 2024`;
+    const currentYear = new Date().getFullYear();
+    const searchQuery = `${searchTerms.join(' ')} jobs hiring ${currentYear}`;
     
     console.log('Searching for jobs:', searchQuery);
 
-    // Use Firecrawl search to find job listings
-    const response = await fetch('https://api.firecrawl.dev/v1/search', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query: searchQuery,
-        limit: 15,
-        lang: 'en',
-        country: 'us',
-        tbs: 'qdr:w', // Jobs from past week
-        scrapeOptions: {
-          formats: ['markdown'],
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    let response: Response;
+    try {
+      response = await fetch('https://api.firecrawl.dev/v1/search', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
         },
-      }),
-    });
+        body: JSON.stringify({
+          query: searchQuery,
+          limit: 15,
+          lang: 'en',
+          country: 'us',
+          tbs: 'qdr:w',
+          scrapeOptions: {
+            formats: ['markdown'],
+          },
+        }),
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Job search timed out. Please try again.' }),
+          { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const data = await response.json();
 

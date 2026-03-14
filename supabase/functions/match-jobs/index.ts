@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
@@ -15,7 +14,7 @@ interface JobToMatch {
   tags?: string[];
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -72,18 +71,23 @@ serve(async (req) => {
       description: (job.description || "").substring(0, 300),
     }));
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert job matching AI. Analyze how well a candidate matches job listings based on their skills and experience.
+    const aiController = new AbortController();
+    const aiTimeout = setTimeout(() => aiController.abort(), 20000);
+
+    let response: Response;
+    try {
+      response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages: [
+            {
+              role: "system",
+              content: `You are an expert job matching AI. Analyze how well a candidate matches job listings based on their skills and experience.
 
 Candidate Profile:
 - Current/Target Title: ${userTitle || "Not specified"}
@@ -96,44 +100,61 @@ Score each job from 0-100 based on:
 - Overall fit (30%): Considering all factors, how good is this match?
 
 Be realistic: a perfect match is rare. Most matches should be 40-80.`,
-          },
-          {
-            role: "user",
-            content: `Analyze these ${jobs.length} jobs and provide match scores:\n\n${JSON.stringify(jobSummaries, null, 2)}`,
-          },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "return_match_scores",
-              description: "Return match scores for each job",
-              parameters: {
-                type: "object",
-                properties: {
-                  matches: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        index: { type: "number", description: "The job index from the input" },
-                        score: { type: "number", description: "Match score from 0-100" },
-                        reason: { type: "string", description: "Brief reason for the score (max 50 chars)" },
+            },
+            {
+              role: "user",
+              content: `Analyze these ${jobs.length} jobs and provide match scores:\n\n${JSON.stringify(jobSummaries, null, 2)}`,
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "return_match_scores",
+                description: "Return match scores for each job",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    matches: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          index: { type: "number", description: "The job index from the input" },
+                          score: { type: "number", description: "Match score from 0-100" },
+                          reason: { type: "string", description: "Brief reason for the score (max 50 chars)" },
+                        },
+                        required: ["index", "score"],
+                        additionalProperties: false,
                       },
-                      required: ["index", "score"],
-                      additionalProperties: false,
                     },
                   },
+                  required: ["matches"],
+                  additionalProperties: false,
                 },
-                required: ["matches"],
-                additionalProperties: false,
               },
             },
-          },
-        ],
-        tool_choice: { type: "function", function: { name: "return_match_scores" } },
-      }),
-    });
+          ],
+          tool_choice: { type: "function", function: { name: "return_match_scores" } },
+        }),
+        signal: aiController.signal,
+      });
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        console.warn("AI matching timed out, returning default scores");
+        return new Response(
+          JSON.stringify({
+            success: true,
+            matchedJobs: jobs.map(j => ({ ...j, matchScore: 50 })),
+            timedOut: true,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(aiTimeout);
+    }
 
     if (!response.ok) {
       if (response.status === 429) {

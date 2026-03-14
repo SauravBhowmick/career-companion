@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -21,7 +20,7 @@ interface JobAlertRequest {
   }[];
 }
 
-const handler = async (req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -37,22 +36,14 @@ const handler = async (req: Request): Promise<Response> => {
 
     const { userId, jobs }: JobAlertRequest = await req.json();
 
-    // Get user profile and preferences
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("email, full_name")
-      .eq("user_id", userId)
-      .single();
+    const [{ data: profile, error: profileError }, { data: preferences }] = await Promise.all([
+      supabase.from("profiles").select("email, full_name").eq("user_id", userId).single(),
+      supabase.from("user_preferences").select("email_notifications").eq("user_id", userId).single(),
+    ]);
 
     if (profileError || !profile?.email) {
       throw new Error("User profile not found or missing email");
     }
-
-    const { data: preferences } = await supabase
-      .from("user_preferences")
-      .select("email_notifications")
-      .eq("user_id", userId)
-      .single();
 
     if (!preferences?.email_notifications) {
       return new Response(
@@ -139,6 +130,4 @@ const handler = async (req: Request): Promise<Response> => {
       { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   }
-};
-
-serve(handler);
+});

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Job } from '@/types/job';
@@ -13,8 +13,21 @@ export function useRealJobs() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const cacheRef = useRef<Map<string, { jobs: Job[]; ts: number }>>(new Map());
 
   const fetchJobs = useCallback(async (options: FetchJobsOptions = {}) => {
+    // Abort any in-flight request
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+
+    const cacheKey = JSON.stringify(options);
+    const cached = cacheRef.current.get(cacheKey);
+    if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+      setJobs(cached.jobs);
+      return cached.jobs;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -31,23 +44,24 @@ export function useRealJobs() {
         throw new Error(data.error || 'Failed to fetch jobs');
       }
 
-      // Transform to match the Job type
       const transformedJobs: Job[] = data.jobs.map((job: any) => ({
         id: job.id,
         title: job.title,
         company: job.company,
+        companyLogo: `https://ui-avatars.com/api/?name=${encodeURIComponent(job.company.substring(0, 2))}&background=6366f1&color=fff&size=80`,
         location: job.location,
         salary: job.salary || 'Competitive',
         type: job.type || 'Full-time',
-        posted: 'Recently',
+        postedAt: job.postedAt ? formatPostedDate(job.postedAt) : 'Recently',
         matchScore: job.matchScore || 80,
         tags: extractTags(job.title, job.description),
-        description: job.description,
+        description: job.description || '',
         requirements: [],
-        url: job.url,
+        website: job.url,
       }));
 
       setJobs(transformedJobs);
+      cacheRef.current.set(cacheKey, { jobs: transformedJobs, ts: Date.now() });
       return transformedJobs;
     } catch (err: any) {
       const message = err.message || 'Failed to fetch jobs';
@@ -65,6 +79,18 @@ export function useRealJobs() {
     error,
     fetchJobs,
   };
+}
+
+function formatPostedDate(isoDate: string): string {
+  const posted = new Date(isoDate);
+  const now = new Date();
+  const diffMs = now.getTime() - posted.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (diffHours < 1) return 'Just now';
+  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  return `${Math.floor(diffDays / 7)} week${Math.floor(diffDays / 7) > 1 ? 's' : ''} ago`;
 }
 
 function extractTags(title: string, description?: string): string[] {

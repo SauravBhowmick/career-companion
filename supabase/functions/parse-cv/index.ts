@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
@@ -6,7 +5,48 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-serve(async (req) => {
+function extractTextFromPdf(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const raw = new TextDecoder("latin1").decode(bytes);
+
+  const textChunks: string[] = [];
+
+  // Extract text between BT (Begin Text) and ET (End Text) operators
+  const btEtRegex = /BT\s([\s\S]*?)ET/g;
+  let match;
+  while ((match = btEtRegex.exec(raw)) !== null) {
+    const block = match[1];
+    // Extract string literals in parentheses
+    const parenRegex = /\(([^)]*)\)/g;
+    let pm;
+    while ((pm = parenRegex.exec(block)) !== null) {
+      if (pm[1].trim()) textChunks.push(pm[1]);
+    }
+    // Extract hex strings
+    const hexRegex = /<([0-9A-Fa-f]+)>/g;
+    let hm;
+    while ((hm = hexRegex.exec(block)) !== null) {
+      const hex = hm[1];
+      let decoded = "";
+      for (let i = 0; i < hex.length; i += 2) {
+        const charCode = parseInt(hex.substring(i, i + 2), 16);
+        if (charCode >= 32 && charCode < 127) decoded += String.fromCharCode(charCode);
+      }
+      if (decoded.trim()) textChunks.push(decoded);
+    }
+  }
+
+  if (textChunks.length > 0) {
+    return textChunks.join(" ").replace(/\s+/g, " ").trim();
+  }
+
+  // Fallback: extract any printable ASCII sequences
+  const printable = raw.replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s+/g, " ").trim();
+  const words = printable.split(" ").filter((w) => w.length > 2);
+  return words.join(" ").substring(0, 15000);
+}
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -29,7 +69,6 @@ serve(async (req) => {
 
     console.log(`Parsing CV for user ${userId}, path: ${cvPath}`);
 
-    // Download the CV file from storage
     const { data: fileData, error: downloadError } = await supabase.storage
       .from("resumes")
       .download(cvPath);
@@ -38,13 +77,31 @@ serve(async (req) => {
       throw new Error(`Failed to download CV: ${downloadError.message}`);
     }
 
-    // Extract text content from the file
-    const text = await fileData.text();
-    
+    const fileExtension = cvPath.split(".").pop()?.toLowerCase();
+    let text: string;
+
+    if (fileExtension === "pdf") {
+      const buffer = await fileData.arrayBuffer();
+      text = extractTextFromPdf(buffer);
+    } else {
+      // For DOC/DOCX or plain text, attempt text extraction
+      text = await fileData.text();
+    }
+
+    if (!text || text.trim().length < 20) {
+      throw new Error(
+        "Could not extract readable text from your resume. Please upload a text-based PDF (not scanned/image-based)."
+      );
+    }
+
     console.log("CV content length:", text.length);
 
-    // Use AI to parse the CV and extract structured data
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const aiController = new AbortController();
+    const aiTimeout = setTimeout(() => aiController.abort(), 25000);
+
+    let response: Response;
+    try {
+    response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${LOVABLE_API_KEY}`,
@@ -113,7 +170,20 @@ Be thorough in extracting ALL skills mentioned, including:
         ],
         tool_choice: { type: "function", function: { name: "extract_cv_data" } },
       }),
+      signal: aiController.signal,
     });
+    } catch (err: any) {
+      clearTimeout(aiTimeout);
+      if (err.name === "AbortError") {
+        return new Response(
+          JSON.stringify({ error: "CV parsing timed out. Please try again." }),
+          { status: 504, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(aiTimeout);
+    }
 
     if (!response.ok) {
       if (response.status === 429) {

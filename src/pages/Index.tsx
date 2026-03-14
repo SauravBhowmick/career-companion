@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import { RefreshCw, Loader2, Sparkles } from "lucide-react";
 import { Header } from "@/components/Header";
@@ -38,7 +38,9 @@ const Index = () => {
     locations: [] as string[],
   });
 
-  // Fetch real jobs when search changes (debounced)
+  const matchingRef = useRef(false);
+  const prevJobsKeyRef = useRef("");
+
   useEffect(() => {
     if (!useRealData) return;
     
@@ -48,24 +50,34 @@ const Index = () => {
         location: filters.locations[0],
         jobType: filters.jobTypes[0],
       });
-    }, 500);
+    }, 800);
     
     return () => clearTimeout(timeoutId);
   }, [searchQuery, useRealData, filters.locations, filters.jobTypes, fetchJobs]);
 
-  // Run AI matching when jobs change or user logs in
+  // Stable reference to the current jobs list
+  const currentJobs = useMemo(
+    () => (useRealData ? realJobs : mockJobs),
+    [useRealData, realJobs]
+  );
+
   useEffect(() => {
-    const runMatching = async () => {
-      const jobsToMatch = useRealData ? realJobs : mockJobs;
-      if (user && jobsToMatch.length > 0) {
-        const matched = await matchJobs(jobsToMatch);
-        setMatchedJobs(matched);
-      } else {
-        setMatchedJobs(jobsToMatch);
-      }
-    };
-    runMatching();
-  }, [user, realJobs, useRealData, matchJobs]);
+    const jobsKey = currentJobs.map(j => j.id).join(",") + `|${user?.id ?? "anon"}`;
+    if (jobsKey === prevJobsKeyRef.current) return;
+    if (matchingRef.current) return;
+
+    prevJobsKeyRef.current = jobsKey;
+
+    if (!user || currentJobs.length === 0) {
+      setMatchedJobs(currentJobs);
+      return;
+    }
+
+    matchingRef.current = true;
+    matchJobs(currentJobs)
+      .then(setMatchedJobs)
+      .finally(() => { matchingRef.current = false; });
+  }, [currentJobs, user, matchJobs]);
 
   const handleFetchRealJobs = () => {
     setUseRealData(true);
