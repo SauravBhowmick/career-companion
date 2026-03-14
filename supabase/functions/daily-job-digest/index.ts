@@ -75,11 +75,17 @@ async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
         company = urlMatch[1].replace(".com", "").replace(".io", "");
         company = company.charAt(0).toUpperCase() + company.slice(1);
       }
+
+      const rawLocation = (
+        result.location || result.city || result.place || ""
+      ).trim();
+      const location = rawLocation || "Unknown";
+
       return {
         id: `digest-${Date.now()}-${index}`,
-        title: (result.title || "Job Position").replace(/\s*[-|]\s*.*$/, "").trim().substring(0, 100),
+        title: (result.title || "Job Position").replace(/\s+[-|]\s+.*$/, "").trim().substring(0, 100),
         company,
-        location: "Remote",
+        location,
       };
     }).filter((j: DigestJob) =>
       j.title &&
@@ -99,12 +105,26 @@ const DEV_FALLBACK_JOBS: DigestJob[] = [
   { id: "fb-3", title: "React Developer", company: "Digital Agency", location: "New York, NY (Hybrid)", salary: "$100k - $130k", matchScore: 82 },
 ];
 
+const CRON_SECRET = Deno.env.get("CRON_SECRET");
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Caller authorization — reject unless a valid secret is presented
+    const incomingSecret =
+      req.headers.get("x-cron-secret") ||
+      req.headers.get("Authorization")?.replace("Bearer ", "");
+
+    if (!CRON_SECRET || incomingSecret !== CRON_SECRET) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
     if (!RESEND_API_KEY) {
       throw new Error("RESEND_API_KEY is not configured");
     }

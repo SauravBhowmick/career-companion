@@ -64,7 +64,9 @@ const Index = () => {
   const runMatch = useCallback(
     (jobs: Job[], key: string) => {
       if (inFlightRef.current) {
-        pendingMatchRef.current = { jobs, key };
+        if (pendingMatchRef.current?.key !== key) {
+          pendingMatchRef.current = { jobs, key };
+        }
         return;
       }
 

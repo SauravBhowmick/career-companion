@@ -98,10 +98,41 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { userId, cvPath } = await req.json();
+    // --- Auth: verify caller identity from JWT ---
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Missing or invalid Authorization header" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    if (!userId || !cvPath) {
-      throw new Error("userId and cvPath are required");
+    const jwt = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
+
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized: invalid or expired token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const userId = user.id;
+    const { cvPath } = await req.json();
+
+    if (!cvPath) {
+      return new Response(
+        JSON.stringify({ error: "cvPath is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate the resume belongs to this user (path must start with userId/)
+    if (!cvPath.startsWith(`${userId}/`)) {
+      return new Response(
+        JSON.stringify({ error: "Forbidden: resume does not belong to authenticated user" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     console.log(`Parsing CV for user ${userId}, path: ${cvPath}`);
@@ -114,12 +145,25 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download CV: ${downloadError.message}`);
     }
 
+    // Size guard — reject before materializing the full buffer/text
+    if (fileData.size > MAX_PDF_BYTES) {
+      return new Response(
+        JSON.stringify({
+          error: `File is too large (${(fileData.size / 1024 / 1024).toFixed(1)} MB). Maximum supported size is ${MAX_PDF_BYTES / 1024 / 1024} MB.`,
+        }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const fileExtension = cvPath.split(".").pop()?.toLowerCase();
     let text: string;
 
     if (fileExtension === "doc" || fileExtension === "docx") {
-      throw new Error(
-        "DOC/DOCX files cannot be parsed directly. Please convert your resume to PDF and re-upload."
+      return new Response(
+        JSON.stringify({
+          error: "DOC/DOCX files cannot be parsed directly. Please convert your resume to PDF and re-upload.",
+        }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     } else if (fileExtension === "pdf") {
       const buffer = await fileData.arrayBuffer();
@@ -129,8 +173,11 @@ Deno.serve(async (req) => {
     }
 
     if (!text || text.trim().length < 20) {
-      throw new Error(
-        "Could not extract readable text from your resume. Please upload a text-based PDF (not scanned/image-based)."
+      return new Response(
+        JSON.stringify({
+          error: "Could not extract readable text from your resume. Please upload a text-based PDF (not scanned/image-based).",
+        }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 

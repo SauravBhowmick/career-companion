@@ -1,7 +1,7 @@
 CREATE TABLE public.rate_limits (
   user_id UUID NOT NULL,
   action  TEXT NOT NULL,
-  window_start TIMESTAMPTZ NOT NULL DEFAULT now(),
+  window_start TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
   request_count INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (user_id, action)
 );
@@ -26,7 +26,7 @@ DECLARE
 BEGIN
   -- Upsert: create row if absent, otherwise fetch existing
   INSERT INTO public.rate_limits (user_id, action, window_start, request_count)
-  VALUES (p_user_id, p_action, now(), 0)
+  VALUES (p_user_id, p_action, clock_timestamp(), 0)
   ON CONFLICT (user_id, action) DO NOTHING;
 
   -- Lock the row for the duration of this check
@@ -37,9 +37,9 @@ BEGIN
      FOR UPDATE;
 
   -- Window expired → reset
-  IF EXTRACT(EPOCH FROM (now() - v_window_start)) * 1000 > p_window_ms THEN
+  IF EXTRACT(EPOCH FROM (clock_timestamp() - v_window_start)) * 1000 >= p_window_ms THEN
     UPDATE public.rate_limits
-       SET window_start = now(), request_count = 1
+       SET window_start = clock_timestamp(), request_count = 1
      WHERE user_id = p_user_id AND action = p_action;
     RETURN FALSE;
   END IF;

@@ -28,6 +28,10 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function sanitizePlainText(str: string): string {
+  return str.replace(/[\r\n\x00-\x1f]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -74,6 +78,10 @@ Deno.serve(async (req) => {
 
     if (rlError) {
       console.error("Rate-limit check failed:", rlError.message);
+      return new Response(
+        JSON.stringify({ error: "Service temporarily unavailable. Please try again shortly." }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     if (rateLimited === true) {
@@ -100,7 +108,11 @@ Deno.serve(async (req) => {
       throw new Error("Your account has no email address on file");
     }
 
-    // Escape every user-controlled value before inserting into HTML
+    // Plain-text sanitized values for email subject (no HTML encoding)
+    const plainJobTitle = sanitizePlainText(jobTitle);
+    const plainCompany = sanitizePlainText(company || "Unknown");
+
+    // HTML-escaped values for the email body
     const safeJobTitle = escapeHtml(jobTitle);
     const safeCompany = escapeHtml(company || "Unknown");
     const safeEmail = escapeHtml(recipientEmail);
@@ -121,7 +133,7 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           from: "JobFlow Applications <onboarding@resend.dev>",
           to: [recipientEmail],
-          subject: `Application Confirmed: ${safeJobTitle} at ${safeCompany}`,
+          subject: `Application Confirmed: ${plainJobTitle} at ${plainCompany}`,
           html: `
             <!DOCTYPE html>
             <html>

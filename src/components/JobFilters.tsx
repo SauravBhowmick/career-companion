@@ -23,11 +23,11 @@ interface LocationGroup {
   locations: string[];
 }
 
+function slugify(str: string): string {
+  return str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
 const LOCATION_GROUPS: LocationGroup[] = [
-  {
-    region: "Global",
-    locations: ["Remote"],
-  },
   {
     region: "United States",
     locations: [
@@ -153,7 +153,6 @@ const LOCATION_GROUPS: LocationGroup[] = [
 
 export function JobFilters({ filters, onFilterChange }: JobFiltersProps) {
   const [expandedRegions, setExpandedRegions] = useState<Record<string, boolean>>({
-    Global: true,
     "United States": true,
   });
 
@@ -281,23 +280,26 @@ export function JobFilters({ filters, onFilterChange }: JobFiltersProps) {
                         className="overflow-hidden"
                       >
                         <div className="space-y-1.5 pb-2 pl-1">
-                          {group.locations.map((location) => (
-                            <div key={location} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={location}
-                                checked={filters.locations.includes(location)}
-                                onCheckedChange={(checked) =>
-                                  handleLocationChange(location, checked as boolean)
-                                }
-                              />
-                              <Label
-                                htmlFor={location}
-                                className="text-sm font-normal cursor-pointer"
-                              >
-                                {location}
-                              </Label>
-                            </div>
-                          ))}
+                          {group.locations.map((location) => {
+                            const locId = `loc-${slugify(location)}`;
+                            return (
+                              <div key={location} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={locId}
+                                  checked={filters.locations.includes(location)}
+                                  onCheckedChange={(checked) =>
+                                    handleLocationChange(location, checked as boolean)
+                                  }
+                                />
+                                <Label
+                                  htmlFor={locId}
+                                  className="text-sm font-normal cursor-pointer"
+                                >
+                                  {location}
+                                </Label>
+                              </div>
+                            );
+                          })}
                         </div>
                       </motion.div>
                     )}
