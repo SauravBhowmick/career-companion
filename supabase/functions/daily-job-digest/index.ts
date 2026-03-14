@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
+const ENABLE_DEV_FALLBACK = Deno.env.get("ENABLE_DEV_FALLBACK") === "true";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -18,9 +19,26 @@ interface DigestJob {
   matchScore?: number;
 }
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  if (!domain) return "***";
+  const masked = local.length <= 2
+    ? "*".repeat(local.length)
+    : local[0] + "*".repeat(local.length - 2) + local[local.length - 1];
+  return `${masked}@${domain}`;
+}
+
 async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
   if (!FIRECRAWL_API_KEY) {
-    console.warn("FIRECRAWL_API_KEY not set, using fallback jobs");
     return [];
   }
 
@@ -62,7 +80,6 @@ async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
         title: (result.title || "Job Position").replace(/\s*[-|]\s*.*$/, "").trim().substring(0, 100),
         company,
         location: "Remote",
-        matchScore: Math.floor(70 + Math.random() * 28),
       };
     }).filter((j: DigestJob) =>
       j.title &&
@@ -76,7 +93,7 @@ async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
   }
 }
 
-const FALLBACK_JOBS: DigestJob[] = [
+const DEV_FALLBACK_JOBS: DigestJob[] = [
   { id: "fb-1", title: "Senior Frontend Developer", company: "TechCorp Inc", location: "Remote", salary: "$120k - $150k", matchScore: 95 },
   { id: "fb-2", title: "Full Stack Engineer", company: "StartupXYZ", location: "San Francisco, CA", salary: "$130k - $160k", matchScore: 88 },
   { id: "fb-3", title: "React Developer", company: "Digital Agency", location: "New York, NY (Hybrid)", salary: "$100k - $130k", matchScore: 82 },
@@ -90,6 +107,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   try {
     if (!RESEND_API_KEY) {
       throw new Error("RESEND_API_KEY is not configured");
+    }
+
+    if (!FIRECRAWL_API_KEY && !ENABLE_DEV_FALLBACK) {
+      throw new Error(
+        "FIRECRAWL_API_KEY is not configured and dev fallback is disabled. " +
+        "Set ENABLE_DEV_FALLBACK=true to use static test data."
+      );
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -116,29 +140,45 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     console.log(`Found ${usersWithNotifications.length} users with notifications enabled`);
 
-    // Fetch live jobs (with fallback)
     const liveJobs = await fetchLiveJobs("software developer");
-    const newJobs = liveJobs.length > 0 ? liveJobs : FALLBACK_JOBS;
-    console.log(`Using ${liveJobs.length > 0 ? "live" : "fallback"} jobs (${newJobs.length} total)`);
+    let newJobs: DigestJob[];
+    if (liveJobs.length > 0) {
+      newJobs = liveJobs;
+      console.log(`Using live jobs (${newJobs.length} total)`);
+    } else if (ENABLE_DEV_FALLBACK) {
+      newJobs = DEV_FALLBACK_JOBS;
+      console.warn("Using DEV fallback jobs — not for production use");
+    } else {
+      throw new Error("Failed to fetch live jobs and dev fallback is disabled");
+    }
 
     const results = { sent: 0, failed: 0, skipped: 0, errors: [] as string[] };
 
-    // Batch fetch all user profiles in one query
     const userIds = usersWithNotifications.map((u) => u.user_id);
-    const { data: profiles } = await supabase
+    const { data: profiles, error: profilesError } = await supabase
       .from("profiles")
       .select("user_id, email, full_name")
       .in("user_id", userIds);
 
-    const profileMap = new Map(
-      (profiles || []).map((p) => [p.user_id, p])
-    );
+    if (profilesError) {
+      throw new Error(`Failed to fetch user profiles: ${profilesError.message}`);
+    }
 
-    // Send emails concurrently in batches of 5
+    if (!profiles || profiles.length === 0) {
+      return new Response(
+        JSON.stringify({ message: "No profiles found for notifiable users", ...results }),
+        { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    const profileMap = new Map(profiles.map((p) => [p.user_id, p]));
+
     const BATCH_SIZE = 5;
+    const RESEND_TIMEOUT_MS = 10_000;
+
     for (let i = 0; i < usersWithNotifications.length; i += BATCH_SIZE) {
       const batch = usersWithNotifications.slice(i, i + BATCH_SIZE);
-      await Promise.allSettled(
+      const settled = await Promise.allSettled(
         batch.map(async (userPref) => {
           const profile = profileMap.get(userPref.user_id);
           if (!profile?.email) {
@@ -160,10 +200,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
               (job) => `
               <tr>
                 <td style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
-                  <h3 style="margin: 0 0 4px 0; color: #111827; font-size: 16px;">${job.title}</h3>
-                  <p style="margin: 0 0 4px 0; color: #6b7280; font-size: 14px;">${job.company}</p>
+                  <h3 style="margin: 0 0 4px 0; color: #111827; font-size: 16px;">${escapeHtml(job.title)}</h3>
+                  <p style="margin: 0 0 4px 0; color: #6b7280; font-size: 14px;">${escapeHtml(job.company)}</p>
                   <p style="margin: 0; color: #9ca3af; font-size: 12px;">
-                    ${job.location}${job.salary ? ` &bull; ${job.salary}` : ""}
+                    ${escapeHtml(job.location)}${job.salary ? ` &bull; ${escapeHtml(job.salary)}` : ""}
                     ${job.matchScore ? ` &bull; ${job.matchScore}% match` : ""}
                   </p>
                 </td>
@@ -172,51 +212,74 @@ Deno.serve(async (req: Request): Promise<Response> => {
             )
             .join("");
 
-          const emailResponse = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${RESEND_API_KEY}`,
-            },
-            body: JSON.stringify({
-              from: "Job Alerts <onboarding@resend.dev>",
-              to: [profile.email],
-              subject: `Daily Job Digest: ${matchingJobs.length} New Matching Job${matchingJobs.length > 1 ? "s" : ""}`,
-              html: `
-                <!DOCTYPE html>
-                <html>
-                <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-                <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; margin: 0; padding: 20px;">
-                  <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                    <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); padding: 32px; text-align: center;">
-                      <h1 style="color: white; margin: 0; font-size: 24px;">Your Daily Job Digest</h1>
-                      <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0;">
-                        Hi ${profile.full_name || "there"}, here are today's top ${matchingJobs.length} matching job${matchingJobs.length > 1 ? "s" : ""}
-                      </p>
-                    </div>
-                    <table style="width: 100%; border-collapse: collapse;">${jobListHtml}</table>
-                    <div style="padding: 24px; text-align: center; background: #f9fafb;">
-                      <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                        You're receiving this daily digest because you enabled job alerts.<br>
-                        Manage your notification preferences in your account settings.
-                      </p>
-                    </div>
-                  </div>
-                </body>
-                </html>
-              `,
-            }),
-          });
+          const safeName = escapeHtml(profile.full_name || "there");
 
-          const emailData = await emailResponse.json();
-          if (!emailResponse.ok) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS);
+
+          try {
+            const emailResponse = await fetch("https://api.resend.com/emails", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${RESEND_API_KEY}`,
+              },
+              body: JSON.stringify({
+                from: "Job Alerts <onboarding@resend.dev>",
+                to: [profile.email],
+                subject: `Daily Job Digest: ${matchingJobs.length} New Matching Job${matchingJobs.length > 1 ? "s" : ""}`,
+                html: `
+                  <!DOCTYPE html>
+                  <html>
+                  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+                  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; margin: 0; padding: 20px;">
+                    <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                      <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); padding: 32px; text-align: center;">
+                        <h1 style="color: white; margin: 0; font-size: 24px;">Your Daily Job Digest</h1>
+                        <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0;">
+                          Hi ${safeName}, here are today's top ${matchingJobs.length} matching job${matchingJobs.length > 1 ? "s" : ""}
+                        </p>
+                      </div>
+                      <table style="width: 100%; border-collapse: collapse;">${jobListHtml}</table>
+                      <div style="padding: 24px; text-align: center; background: #f9fafb;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                          You're receiving this daily digest because you enabled job alerts.<br>
+                          Manage your notification preferences in your account settings.
+                        </p>
+                      </div>
+                    </div>
+                  </body>
+                  </html>
+                `,
+              }),
+              signal: controller.signal,
+            });
+
+            const emailData = await emailResponse.json();
+            if (!emailResponse.ok) {
+              results.failed++;
+              results.errors.push(`${maskEmail(profile.email)}: ${emailData.message || "Unknown error"}`);
+            } else {
+              results.sent++;
+            }
+          } catch (fetchErr: any) {
             results.failed++;
-            results.errors.push(`${profile.email}: ${emailData.message || "Unknown error"}`);
-          } else {
-            results.sent++;
+            const reason = fetchErr.name === "AbortError"
+              ? "Email send timed out"
+              : (fetchErr.message || "Unknown fetch error");
+            results.errors.push(`user ${userPref.user_id}: ${reason}`);
+          } finally {
+            clearTimeout(timeoutId);
           }
         })
       );
+
+      for (const entry of settled) {
+        if (entry.status === "rejected") {
+          results.failed++;
+          results.errors.push(`Unexpected error: ${entry.reason?.message || String(entry.reason)}`);
+        }
+      }
     }
 
     console.log("Daily digest complete:", results);

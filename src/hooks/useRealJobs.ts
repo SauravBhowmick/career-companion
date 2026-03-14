@@ -13,14 +13,11 @@ export function useRealJobs() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  // TODO: supabase.functions.invoke does not support AbortSignal yet —
+  // revisit when https://github.com/supabase/supabase-js/issues/797 lands.
   const cacheRef = useRef<Map<string, { jobs: Job[]; ts: number }>>(new Map());
 
   const fetchJobs = useCallback(async (options: FetchJobsOptions = {}) => {
-    // Abort any in-flight request
-    abortRef.current?.abort();
-    abortRef.current = new AbortController();
-
     const cacheKey = JSON.stringify(options);
     const cached = cacheRef.current.get(cacheKey);
     if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
@@ -53,7 +50,7 @@ export function useRealJobs() {
         salary: job.salary || 'Competitive',
         type: job.type || 'Full-time',
         postedAt: job.postedAt ? formatPostedDate(job.postedAt) : 'Recently',
-        matchScore: job.matchScore || 80,
+        matchScore: job.matchScore,
         tags: extractTags(job.title, job.description),
         description: job.description || '',
         requirements: [],
@@ -90,7 +87,8 @@ function formatPostedDate(isoDate: string): string {
   if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
   const diffDays = Math.floor(diffHours / 24);
   if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-  return `${Math.floor(diffDays / 7)} week${Math.floor(diffDays / 7) > 1 ? 's' : ''} ago`;
+  const weeks = Math.floor(diffDays / 7);
+  return `${weeks} week${weeks !== 1 ? 's' : ''} ago`;
 }
 
 function extractTags(title: string, description?: string): string[] {

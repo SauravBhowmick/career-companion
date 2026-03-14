@@ -38,8 +38,8 @@ const Index = () => {
     locations: [] as string[],
   });
 
-  const matchingRef = useRef(false);
-  const prevJobsKeyRef = useRef("");
+  const matchVersionRef = useRef(0);
+  const pendingMatchRef = useRef<{ jobs: Job[]; key: string } | null>(null);
 
   useEffect(() => {
     if (!useRealData) return;
@@ -55,29 +55,45 @@ const Index = () => {
     return () => clearTimeout(timeoutId);
   }, [searchQuery, useRealData, filters.locations, filters.jobTypes, fetchJobs]);
 
-  // Stable reference to the current jobs list
   const currentJobs = useMemo(
     () => (useRealData ? realJobs : mockJobs),
     [useRealData, realJobs]
   );
 
-  useEffect(() => {
-    const jobsKey = currentJobs.map(j => j.id).join(",") + `|${user?.id ?? "anon"}`;
-    if (jobsKey === prevJobsKeyRef.current) return;
-    if (matchingRef.current) return;
+  const runMatch = useCallback(
+    (jobs: Job[], key: string) => {
+      const version = ++matchVersionRef.current;
+      pendingMatchRef.current = null;
 
-    prevJobsKeyRef.current = jobsKey;
+      matchJobs(jobs).then((result) => {
+        if (matchVersionRef.current !== version) return;
+        setMatchedJobs(result);
+
+        if (pendingMatchRef.current && pendingMatchRef.current.key !== key) {
+          const next = pendingMatchRef.current;
+          runMatch(next.jobs, next.key);
+        }
+      });
+    },
+    [matchJobs]
+  );
+
+  useEffect(() => {
+    const jobsKey = currentJobs.map((j) => j.id).join(",") + `|${user?.id ?? "anon"}`;
 
     if (!user || currentJobs.length === 0) {
+      ++matchVersionRef.current;
+      pendingMatchRef.current = null;
       setMatchedJobs(currentJobs);
       return;
     }
 
-    matchingRef.current = true;
-    matchJobs(currentJobs)
-      .then(setMatchedJobs)
-      .finally(() => { matchingRef.current = false; });
-  }, [currentJobs, user, matchJobs]);
+    if (matchVersionRef.current > 0 && pendingMatchRef.current === null) {
+      pendingMatchRef.current = { jobs: currentJobs, key: jobsKey };
+    }
+
+    runMatch(currentJobs, jobsKey);
+  }, [currentJobs, user, runMatch]);
 
   const handleFetchRealJobs = () => {
     setUseRealData(true);

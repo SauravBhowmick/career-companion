@@ -5,6 +5,13 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+/**
+ * Best-effort PDF text extraction using raw BT/ET operator parsing.
+ * Limitations: will not extract text from compressed streams (FlateDecode),
+ * CID-keyed fonts, XObject forms, or scanned/image-only PDFs. For production
+ * use with complex PDFs, consider integrating a full parser (e.g. pdf-parse
+ * or pdfjs-dist). Returns empty string when no text is recoverable.
+ */
 function extractTextFromPdf(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   const raw = new TextDecoder("latin1").decode(bytes);
@@ -80,11 +87,14 @@ Deno.serve(async (req) => {
     const fileExtension = cvPath.split(".").pop()?.toLowerCase();
     let text: string;
 
-    if (fileExtension === "pdf") {
+    if (fileExtension === "doc" || fileExtension === "docx") {
+      throw new Error(
+        "DOC/DOCX files cannot be parsed directly. Please convert your resume to PDF and re-upload."
+      );
+    } else if (fileExtension === "pdf") {
       const buffer = await fileData.arrayBuffer();
       text = extractTextFromPdf(buffer);
     } else {
-      // For DOC/DOCX or plain text, attempt text extraction
       text = await fileData.text();
     }
 
@@ -173,7 +183,6 @@ Be thorough in extracting ALL skills mentioned, including:
       signal: aiController.signal,
     });
     } catch (err: any) {
-      clearTimeout(aiTimeout);
       if (err.name === "AbortError") {
         return new Response(
           JSON.stringify({ error: "CV parsing timed out. Please try again." }),

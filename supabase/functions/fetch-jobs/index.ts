@@ -13,7 +13,6 @@ interface JobListing {
   description?: string;
   url?: string;
   postedAt?: string;
-  matchScore?: number;
 }
 
 Deno.serve(async (req) => {
@@ -134,9 +133,6 @@ Deno.serve(async (req) => {
         }
       }
       
-      // Generate a pseudo-random match score based on content relevance
-      const matchScore = Math.floor(70 + Math.random() * 28);
-      
       return {
         id: `job-${Date.now()}-${index}`,
         title: title.replace(/\s*[-|]\s*.*$/, '').trim().substring(0, 100),
@@ -147,7 +143,6 @@ Deno.serve(async (req) => {
         description: markdown.substring(0, 500),
         url,
         postedAt: new Date().toISOString(),
-        matchScore,
       };
     }).filter((job: JobListing) => 
       job.title && 

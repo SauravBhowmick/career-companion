@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { X, CheckCircle, Sparkles, Building2, MapPin, DollarSign, Mail } from "lucide-react";
+import { X, CheckCircle, Sparkles, Building2, MapPin, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -27,8 +27,8 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
   });
 
   const handleApply = async () => {
-    if (!formData.email || !formData.phone) {
-      toast.error("Please fill in all fields");
+    if (!formData.phone) {
+      toast.error("Please provide your phone number");
       return;
     }
 
@@ -38,7 +38,6 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
         body: {
           jobTitle: job?.title,
           company: job?.company,
-          applicantEmail: formData.email,
           applicantPhone: formData.phone,
           coverLetter: formData.coverLetter,
         },
@@ -98,7 +97,7 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
                 </motion.div>
                 <h3 className="font-display text-xl font-semibold">Application Sent!</h3>
                 <p className="mt-2 text-muted-foreground">
-                  Confirmation email has been sent to <strong>{formData.email}</strong>
+                  A confirmation email has been sent to your account email.
                 </p>
                 <p className="mt-3 text-sm text-muted-foreground">
                   {autoApplySimilar
@@ -144,22 +143,6 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
 
                   {/* Application Form */}
                   <div className="space-y-4 p-4 rounded-xl bg-muted/30 border">
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Email Address</label>
-                      <div className="flex gap-2">
-                        <Mail className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-2" />
-                        <Input
-                          type="email"
-                          placeholder="your.email@example.com"
-                          value={formData.email}
-                          onChange={(e) =>
-                            setFormData({ ...formData, email: e.target.value })
-                          }
-                          disabled={isLoading}
-                        />
-                      </div>
-                    </div>
-
                     <div>
                       <label className="text-sm font-medium mb-2 block">Phone Number</label>
                       <Input
@@ -213,9 +196,11 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
                               {tag}
                             </Badge>
                           ))}
-                          <Badge variant="outline" className="text-xs">
-                            +{job.tags.length - 3} more
-                          </Badge>
+                          {job.tags.length > 3 && (
+                            <Badge variant="outline" className="text-xs">
+                              +{job.tags.length - 3} more
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </div>

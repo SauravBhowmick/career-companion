@@ -69,47 +69,63 @@ Deno.serve(async (req: Request): Promise<Response> => {
       )
       .join("");
 
-    // Send email using Resend API directly
-    const emailResponse = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: "Job Alerts <onboarding@resend.dev>",
-        to: [profile.email],
-        subject: `🎯 ${jobs.length} New Job${jobs.length > 1 ? "s" : ""} Matching Your Profile`,
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          </head>
-          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; margin: 0; padding: 20px;">
-            <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-              <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); padding: 32px; text-align: center;">
-                <h1 style="color: white; margin: 0; font-size: 24px;">New Jobs For You! 🚀</h1>
-                <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0;">
-                  Hi ${profile.full_name || "there"}, we found ${jobs.length} new job${jobs.length > 1 ? "s" : ""} matching your profile
-                </p>
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    let emailResponse: Response;
+    try {
+      emailResponse = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+        },
+        body: JSON.stringify({
+          from: "Job Alerts <onboarding@resend.dev>",
+          to: [profile.email],
+          subject: `${jobs.length} New Job${jobs.length > 1 ? "s" : ""} Matching Your Profile`,
+          html: `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; margin: 0; padding: 20px;">
+              <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); padding: 32px; text-align: center;">
+                  <h1 style="color: white; margin: 0; font-size: 24px;">New Jobs For You!</h1>
+                  <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0;">
+                    Hi ${profile.full_name || "there"}, we found ${jobs.length} new job${jobs.length > 1 ? "s" : ""} matching your profile
+                  </p>
+                </div>
+                <table style="width: 100%; border-collapse: collapse;">
+                  ${jobListHtml}
+                </table>
+                <div style="padding: 24px; text-align: center; background: #f9fafb;">
+                  <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                    You're receiving this because you enabled job alerts.<br>
+                    Manage your notification preferences in your account settings.
+                  </p>
+                </div>
               </div>
-              <table style="width: 100%; border-collapse: collapse;">
-                ${jobListHtml}
-              </table>
-              <div style="padding: 24px; text-align: center; background: #f9fafb;">
-                <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                  You're receiving this because you enabled job alerts.<br>
-                  Manage your notification preferences in your account settings.
-                </p>
-              </div>
-            </div>
-          </body>
-          </html>
-        `,
-      }),
-    });
+            </body>
+            </html>
+          `,
+        }),
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        return new Response(
+          JSON.stringify({ error: "Email send timed out" }),
+          { status: 504, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const emailData = await emailResponse.json();
 

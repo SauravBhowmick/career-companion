@@ -1,3 +1,5 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
 const corsHeaders = {
@@ -9,9 +11,31 @@ const corsHeaders = {
 interface ApplicationEmailRequest {
   jobTitle: string;
   company: string;
-  applicantEmail: string;
   applicantPhone: string;
   coverLetter?: string;
+}
+
+const recentRequests = new Map<string, number[]>();
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 5;
+
+function isRateLimited(userId: string): boolean {
+  const now = Date.now();
+  const timestamps = recentRequests.get(userId) ?? [];
+  const recent = timestamps.filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
+  recentRequests.set(userId, recent);
+  if (recent.length >= RATE_LIMIT_MAX) return true;
+  recent.push(now);
+  return false;
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 Deno.serve(async (req) => {
@@ -24,17 +48,60 @@ Deno.serve(async (req) => {
       throw new Error("RESEND_API_KEY is not configured");
     }
 
+    // --- Auth: extract and verify JWT ---
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Missing or invalid Authorization header" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const jwt = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
+
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized: invalid or expired token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // --- Rate limiting per user ---
+    if (isRateLimited(user.id)) {
+      return new Response(
+        JSON.stringify({ error: "Too many requests. Please wait a minute before trying again." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const {
       jobTitle,
       company,
-      applicantEmail,
       applicantPhone,
       coverLetter,
     }: ApplicationEmailRequest = await req.json();
 
-    if (!applicantEmail || !jobTitle) {
-      throw new Error("applicantEmail and jobTitle are required");
+    if (!jobTitle) {
+      throw new Error("jobTitle is required");
     }
+
+    // Recipient is always the authenticated user's email — never caller-supplied
+    const recipientEmail = user.email;
+    if (!recipientEmail) {
+      throw new Error("Your account has no email address on file");
+    }
+
+    // Escape every user-controlled value before inserting into HTML
+    const safeJobTitle = escapeHtml(jobTitle);
+    const safeCompany = escapeHtml(company || "Unknown");
+    const safeEmail = escapeHtml(recipientEmail);
+    const safePhone = escapeHtml(applicantPhone || "Not provided");
+    const safeCoverLetter = coverLetter ? escapeHtml(coverLetter) : "";
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
@@ -49,8 +116,8 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           from: "JobFlow Applications <onboarding@resend.dev>",
-          to: [applicantEmail],
-          subject: `Application Confirmed: ${jobTitle} at ${company}`,
+          to: [recipientEmail],
+          subject: `Application Confirmed: ${safeJobTitle} at ${safeCompany}`,
           html: `
             <!DOCTYPE html>
             <html>
@@ -65,18 +132,18 @@ Deno.serve(async (req) => {
                 </div>
                 <div style="padding: 32px;">
                   <p style="color: #374151; font-size: 16px; line-height: 1.6;">
-                    Your application for <strong>${jobTitle}</strong> at <strong>${company}</strong> has been submitted successfully.
+                    Your application for <strong>${safeJobTitle}</strong> at <strong>${safeCompany}</strong> has been submitted successfully.
                   </p>
                   <div style="margin: 24px 0; padding: 16px; background: #f3f4f6; border-radius: 8px;">
-                    <p style="margin: 0 0 8px 0; color: #6b7280; font-size: 14px;"><strong>Position:</strong> ${jobTitle}</p>
-                    <p style="margin: 0 0 8px 0; color: #6b7280; font-size: 14px;"><strong>Company:</strong> ${company}</p>
-                    <p style="margin: 0 0 8px 0; color: #6b7280; font-size: 14px;"><strong>Email:</strong> ${applicantEmail}</p>
-                    <p style="margin: 0; color: #6b7280; font-size: 14px;"><strong>Phone:</strong> ${applicantPhone}</p>
+                    <p style="margin: 0 0 8px 0; color: #6b7280; font-size: 14px;"><strong>Position:</strong> ${safeJobTitle}</p>
+                    <p style="margin: 0 0 8px 0; color: #6b7280; font-size: 14px;"><strong>Company:</strong> ${safeCompany}</p>
+                    <p style="margin: 0 0 8px 0; color: #6b7280; font-size: 14px;"><strong>Email:</strong> ${safeEmail}</p>
+                    <p style="margin: 0; color: #6b7280; font-size: 14px;"><strong>Phone:</strong> ${safePhone}</p>
                   </div>
-                  ${coverLetter ? `
+                  ${safeCoverLetter ? `
                   <div style="margin: 24px 0;">
                     <p style="color: #374151; font-weight: 600; margin-bottom: 8px;">Your Cover Letter:</p>
-                    <p style="color: #6b7280; font-size: 14px; line-height: 1.6; white-space: pre-wrap;">${coverLetter}</p>
+                    <p style="color: #6b7280; font-size: 14px; line-height: 1.6; white-space: pre-wrap;">${safeCoverLetter}</p>
                   </div>
                   ` : ""}
                   <p style="color: #9ca3af; font-size: 13px; margin-top: 24px;">
