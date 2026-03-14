@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
@@ -6,7 +5,85 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-serve(async (req) => {
+const MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 MB
+const TEXT_TARGET_LENGTH = 15_000;
+
+/**
+ * Best-effort PDF text extraction using raw BT/ET operator parsing.
+ * Limitations: will not extract text from compressed streams (FlateDecode),
+ * CID-keyed fonts, XObject forms, or scanned/image-only PDFs. For production
+ * use with complex PDFs, consider integrating a full parser (e.g. pdf-parse
+ * or pdfjs-dist). Returns empty string when no text is recoverable.
+ *
+ * Safety: rejects buffers larger than MAX_PDF_BYTES and stops scanning once
+ * TEXT_TARGET_LENGTH characters have been collected, since the downstream AI
+ * prompt is truncated to 15 000 chars anyway.
+ */
+function extractTextFromPdf(buffer: ArrayBuffer): string {
+  if (buffer.byteLength > MAX_PDF_BYTES) {
+    throw new Error(
+      `PDF is too large (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB). ` +
+      `Maximum supported size is ${MAX_PDF_BYTES / 1024 / 1024} MB.`
+    );
+  }
+
+  const bytes = new Uint8Array(buffer);
+  const raw = new TextDecoder("latin1").decode(bytes);
+
+  const textChunks: string[] = [];
+  let collectedLength = 0;
+
+  const btEtRegex = /BT\s([\s\S]*?)ET/g;
+  let match;
+  while ((match = btEtRegex.exec(raw)) !== null) {
+    if (collectedLength >= TEXT_TARGET_LENGTH) break;
+
+    const block = match[1];
+
+    const parenRegex = /\(([^)]*)\)/g;
+    let pm;
+    while ((pm = parenRegex.exec(block)) !== null) {
+      const chunk = pm[1].trim();
+      if (chunk) {
+        textChunks.push(chunk);
+        collectedLength += chunk.length;
+        if (collectedLength >= TEXT_TARGET_LENGTH) break;
+      }
+    }
+    if (collectedLength >= TEXT_TARGET_LENGTH) break;
+
+    const hexRegex = /<([0-9A-Fa-f]+)>/g;
+    let hm;
+    while ((hm = hexRegex.exec(block)) !== null) {
+      const hex = hm[1];
+      let decoded = "";
+      for (let i = 0; i < hex.length; i += 2) {
+        const charCode = parseInt(hex.substring(i, i + 2), 16);
+        if (charCode >= 32 && charCode < 127) decoded += String.fromCharCode(charCode);
+      }
+      const chunk = decoded.trim();
+      if (chunk) {
+        textChunks.push(chunk);
+        collectedLength += chunk.length;
+        if (collectedLength >= TEXT_TARGET_LENGTH) break;
+      }
+    }
+  }
+
+  if (textChunks.length > 0) {
+    return textChunks.join(" ").replace(/\s+/g, " ").trim().substring(0, TEXT_TARGET_LENGTH);
+  }
+
+  // Fallback: scan for printable ASCII words, but only up to a bounded slice
+  // to avoid O(n) replacement over the full multi-MB string.
+  const scanLimit = Math.min(raw.length, 500_000);
+  const slice = raw.substring(0, scanLimit);
+  const printable = slice.replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s+/g, " ").trim();
+  const words = printable.split(" ").filter((w) => w.length > 2);
+  return words.join(" ").substring(0, TEXT_TARGET_LENGTH);
+}
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -21,15 +98,45 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { userId, cvPath } = await req.json();
+    // --- Auth: verify caller identity from JWT ---
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Missing or invalid Authorization header" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    if (!userId || !cvPath) {
-      throw new Error("userId and cvPath are required");
+    const jwt = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
+
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized: invalid or expired token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const userId = user.id;
+    const { cvPath } = await req.json();
+
+    if (!cvPath) {
+      return new Response(
+        JSON.stringify({ error: "cvPath is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate the resume belongs to this user (path must start with userId/)
+    if (!cvPath.startsWith(`${userId}/`)) {
+      return new Response(
+        JSON.stringify({ error: "Forbidden: resume does not belong to authenticated user" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     console.log(`Parsing CV for user ${userId}, path: ${cvPath}`);
 
-    // Download the CV file from storage
     const { data: fileData, error: downloadError } = await supabase.storage
       .from("resumes")
       .download(cvPath);
@@ -38,13 +145,50 @@ serve(async (req) => {
       throw new Error(`Failed to download CV: ${downloadError.message}`);
     }
 
-    // Extract text content from the file
-    const text = await fileData.text();
-    
+    // Size guard — reject before materializing the full buffer/text
+    if (fileData.size > MAX_PDF_BYTES) {
+      return new Response(
+        JSON.stringify({
+          error: `File is too large (${(fileData.size / 1024 / 1024).toFixed(1)} MB). Maximum supported size is ${MAX_PDF_BYTES / 1024 / 1024} MB.`,
+        }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const fileExtension = cvPath.split(".").pop()?.toLowerCase();
+    let text: string;
+
+    if (fileExtension === "doc" || fileExtension === "docx") {
+      return new Response(
+        JSON.stringify({
+          error: "DOC/DOCX files cannot be parsed directly. Please convert your resume to PDF and re-upload.",
+        }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } else if (fileExtension === "pdf") {
+      const buffer = await fileData.arrayBuffer();
+      text = extractTextFromPdf(buffer);
+    } else {
+      text = await fileData.text();
+    }
+
+    if (!text || text.trim().length < 20) {
+      return new Response(
+        JSON.stringify({
+          error: "Could not extract readable text from your resume. Please upload a text-based PDF (not scanned/image-based).",
+        }),
+        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     console.log("CV content length:", text.length);
 
-    // Use AI to parse the CV and extract structured data
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const aiController = new AbortController();
+    const aiTimeout = setTimeout(() => aiController.abort(), 25000);
+
+    let response: Response;
+    try {
+    response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${LOVABLE_API_KEY}`,
@@ -113,7 +257,19 @@ Be thorough in extracting ALL skills mentioned, including:
         ],
         tool_choice: { type: "function", function: { name: "extract_cv_data" } },
       }),
+      signal: aiController.signal,
     });
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        return new Response(
+          JSON.stringify({ error: "CV parsing timed out. Please try again." }),
+          { status: 504, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(aiTimeout);
+    }
 
     if (!response.ok) {
       if (response.status === 429) {

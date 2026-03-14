@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -8,6 +7,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 interface JobAlertRequest {
   userId: string;
@@ -21,7 +29,7 @@ interface JobAlertRequest {
   }[];
 }
 
-const handler = async (req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -37,22 +45,14 @@ const handler = async (req: Request): Promise<Response> => {
 
     const { userId, jobs }: JobAlertRequest = await req.json();
 
-    // Get user profile and preferences
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("email, full_name")
-      .eq("user_id", userId)
-      .single();
+    const [{ data: profile, error: profileError }, { data: preferences }] = await Promise.all([
+      supabase.from("profiles").select("email, full_name").eq("user_id", userId).single(),
+      supabase.from("user_preferences").select("email_notifications").eq("user_id", userId).single(),
+    ]);
 
     if (profileError || !profile?.email) {
       throw new Error("User profile not found or missing email");
     }
-
-    const { data: preferences } = await supabase
-      .from("user_preferences")
-      .select("email_notifications")
-      .eq("user_id", userId)
-      .single();
 
     if (!preferences?.email_notifications) {
       return new Response(
@@ -66,11 +66,11 @@ const handler = async (req: Request): Promise<Response> => {
         (job) => `
         <tr>
           <td style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
-            <h3 style="margin: 0 0 4px 0; color: #111827; font-size: 16px;">${job.title}</h3>
-            <p style="margin: 0 0 4px 0; color: #6b7280; font-size: 14px;">${job.company}</p>
+            <h3 style="margin: 0 0 4px 0; color: #111827; font-size: 16px;">${escapeHtml(job.title)}</h3>
+            <p style="margin: 0 0 4px 0; color: #6b7280; font-size: 14px;">${escapeHtml(job.company)}</p>
             <p style="margin: 0; color: #9ca3af; font-size: 12px;">
-              ${job.location}${job.salary ? ` • ${job.salary}` : ""}
-              ${job.matchScore ? ` • ${job.matchScore}% match` : ""}
+              ${escapeHtml(job.location)}${job.salary ? ` &bull; ${escapeHtml(job.salary)}` : ""}
+              ${job.matchScore ? ` &bull; ${job.matchScore}% match` : ""}
             </p>
           </td>
         </tr>
@@ -78,47 +78,63 @@ const handler = async (req: Request): Promise<Response> => {
       )
       .join("");
 
-    // Send email using Resend API directly
-    const emailResponse = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: "Job Alerts <onboarding@resend.dev>",
-        to: [profile.email],
-        subject: `🎯 ${jobs.length} New Job${jobs.length > 1 ? "s" : ""} Matching Your Profile`,
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          </head>
-          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; margin: 0; padding: 20px;">
-            <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-              <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); padding: 32px; text-align: center;">
-                <h1 style="color: white; margin: 0; font-size: 24px;">New Jobs For You! 🚀</h1>
-                <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0;">
-                  Hi ${profile.full_name || "there"}, we found ${jobs.length} new job${jobs.length > 1 ? "s" : ""} matching your profile
-                </p>
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    let emailResponse: Response;
+    try {
+      emailResponse = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+        },
+        body: JSON.stringify({
+          from: "Job Alerts <onboarding@resend.dev>",
+          to: [profile.email],
+          subject: `${jobs.length} New Job${jobs.length > 1 ? "s" : ""} Matching Your Profile`,
+          html: `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f9fafb; margin: 0; padding: 20px;">
+              <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); padding: 32px; text-align: center;">
+                  <h1 style="color: white; margin: 0; font-size: 24px;">New Jobs For You!</h1>
+                  <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0;">
+                    Hi ${escapeHtml(profile.full_name || "there")}, we found ${jobs.length} new job${jobs.length > 1 ? "s" : ""} matching your profile
+                  </p>
+                </div>
+                <table style="width: 100%; border-collapse: collapse;">
+                  ${jobListHtml}
+                </table>
+                <div style="padding: 24px; text-align: center; background: #f9fafb;">
+                  <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                    You're receiving this because you enabled job alerts.<br>
+                    Manage your notification preferences in your account settings.
+                  </p>
+                </div>
               </div>
-              <table style="width: 100%; border-collapse: collapse;">
-                ${jobListHtml}
-              </table>
-              <div style="padding: 24px; text-align: center; background: #f9fafb;">
-                <p style="color: #6b7280; font-size: 12px; margin: 0;">
-                  You're receiving this because you enabled job alerts.<br>
-                  Manage your notification preferences in your account settings.
-                </p>
-              </div>
-            </div>
-          </body>
-          </html>
-        `,
-      }),
-    });
+            </body>
+            </html>
+          `,
+        }),
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        return new Response(
+          JSON.stringify({ error: "Email send timed out" }),
+          { status: 504, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const emailData = await emailResponse.json();
 
@@ -139,6 +155,4 @@ const handler = async (req: Request): Promise<Response> => {
       { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   }
-};
-
-serve(handler);
+});

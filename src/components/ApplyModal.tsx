@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { X, CheckCircle, Sparkles, Building2, MapPin, DollarSign, Mail } from "lucide-react";
+import { X, CheckCircle, Sparkles, Building2, MapPin, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Job } from "@/types/job";
 import { useState } from "react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface ApplyModalProps {
   job: Job | null;
@@ -20,41 +21,35 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
   const [isApplied, setIsApplied] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
-    email: "",
     phone: "",
     coverLetter: "",
   });
 
   const handleApply = async () => {
-    if (!formData.email || !formData.phone) {
-      toast.error("Please fill in all fields");
+    if (!formData.phone) {
+      toast.error("Please provide your phone number");
       return;
     }
 
     setIsLoading(true);
     try {
-      // Send email confirmation to company
-      const response = await fetch("/api/send-application-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jobId: job?.id,
+      const { data, error } = await supabase.functions.invoke("send-application-email", {
+        body: {
           jobTitle: job?.title,
           company: job?.company,
-          companyEmail: job?.website, // Use website field for company contact
-          applicantEmail: formData.email,
           applicantPhone: formData.phone,
           coverLetter: formData.coverLetter,
-        }),
+        },
       });
 
-      if (!response.ok) throw new Error("Failed to send application");
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
 
       setIsApplied(true);
       setTimeout(() => {
         onConfirm(autoApplySimilar);
         setIsApplied(false);
-        setFormData({ email: "", phone: "", coverLetter: "" });
+        setFormData({ phone: "", coverLetter: "" });
       }, 1500);
 
       toast.success("Application sent! Check your email for confirmation.");
@@ -71,19 +66,19 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
   return (
     <AnimatePresence>
       {isOpen && (
-        <>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+          onClick={onClose}
+        >
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm"
-            onClick={onClose}
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-card p-6 shadow-xl max-h-[90vh] overflow-y-auto"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-2xl border bg-card p-6 shadow-xl max-h-[90vh] overflow-y-auto"
           >
             {isApplied ? (
               <motion.div
@@ -101,7 +96,7 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
                 </motion.div>
                 <h3 className="font-display text-xl font-semibold">Application Sent!</h3>
                 <p className="mt-2 text-muted-foreground">
-                  Confirmation email has been sent to <strong>{formData.email}</strong>
+                  A confirmation email has been sent to your account email.
                 </p>
                 <p className="mt-3 text-sm text-muted-foreground">
                   {autoApplySimilar
@@ -147,22 +142,6 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
 
                   {/* Application Form */}
                   <div className="space-y-4 p-4 rounded-xl bg-muted/30 border">
-                    <div>
-                      <label className="text-sm font-medium mb-2 block">Email Address</label>
-                      <div className="flex gap-2">
-                        <Mail className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-2" />
-                        <Input
-                          type="email"
-                          placeholder="your.email@example.com"
-                          value={formData.email}
-                          onChange={(e) =>
-                            setFormData({ ...formData, email: e.target.value })
-                          }
-                          disabled={isLoading}
-                        />
-                      </div>
-                    </div>
-
                     <div>
                       <label className="text-sm font-medium mb-2 block">Phone Number</label>
                       <Input
@@ -216,9 +195,11 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
                               {tag}
                             </Badge>
                           ))}
-                          <Badge variant="outline" className="text-xs">
-                            +{job.tags.length - 3} more
-                          </Badge>
+                          {job.tags.length > 3 && (
+                            <Badge variant="outline" className="text-xs">
+                              +{job.tags.length - 3} more
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -236,7 +217,7 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
               </>
             )}
           </motion.div>
-        </>
+        </motion.div>
       )}
     </AnimatePresence>
   );

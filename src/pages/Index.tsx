@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import { RefreshCw, Loader2, Sparkles } from "lucide-react";
 import { Header } from "@/components/Header";
@@ -38,7 +38,10 @@ const Index = () => {
     locations: [] as string[],
   });
 
-  // Fetch real jobs when search changes (debounced)
+  const matchVersionRef = useRef(0);
+  const pendingMatchRef = useRef<{ jobs: Job[]; key: string } | null>(null);
+  const inFlightRef = useRef(false);
+
   useEffect(() => {
     if (!useRealData) return;
     
@@ -48,24 +51,59 @@ const Index = () => {
         location: filters.locations[0],
         jobType: filters.jobTypes[0],
       });
-    }, 500);
+    }, 800);
     
     return () => clearTimeout(timeoutId);
   }, [searchQuery, useRealData, filters.locations, filters.jobTypes, fetchJobs]);
 
-  // Run AI matching when jobs change or user logs in
-  useEffect(() => {
-    const runMatching = async () => {
-      const jobsToMatch = useRealData ? realJobs : mockJobs;
-      if (user && jobsToMatch.length > 0) {
-        const matched = await matchJobs(jobsToMatch);
-        setMatchedJobs(matched);
-      } else {
-        setMatchedJobs(jobsToMatch);
+  const currentJobs = useMemo(
+    () => (useRealData ? realJobs : mockJobs),
+    [useRealData, realJobs]
+  );
+
+  const runMatch = useCallback(
+    (jobs: Job[], key: string) => {
+      if (inFlightRef.current) {
+        if (pendingMatchRef.current?.key !== key) {
+          pendingMatchRef.current = { jobs, key };
+        }
+        return;
       }
-    };
-    runMatching();
-  }, [user, realJobs, useRealData, matchJobs]);
+
+      inFlightRef.current = true;
+      const version = ++matchVersionRef.current;
+      pendingMatchRef.current = null;
+
+      matchJobs(jobs)
+        .then((result) => {
+          if (matchVersionRef.current === version) {
+            setMatchedJobs(result);
+          }
+        })
+        .finally(() => {
+          inFlightRef.current = false;
+          if (pendingMatchRef.current) {
+            const next = pendingMatchRef.current;
+            pendingMatchRef.current = null;
+            runMatch(next.jobs, next.key);
+          }
+        });
+    },
+    [matchJobs]
+  );
+
+  useEffect(() => {
+    const jobsKey = currentJobs.map((j) => j.id).join(",") + `|${user?.id ?? "anon"}`;
+
+    if (!user || currentJobs.length === 0) {
+      ++matchVersionRef.current;
+      pendingMatchRef.current = null;
+      setMatchedJobs(currentJobs);
+      return;
+    }
+
+    runMatch(currentJobs, jobsKey);
+  }, [currentJobs, user, runMatch]);
 
   const handleFetchRealJobs = () => {
     setUseRealData(true);
