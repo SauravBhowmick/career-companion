@@ -55,7 +55,13 @@ async function searchFirecrawl(
     signal,
   });
 
-  if (!response.ok) return [];
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(
+      `Firecrawl ${response.status}: ${body.substring(0, 200) || response.statusText}`
+    );
+  }
+
   const data = await response.json();
   return data.data || [];
 }
@@ -68,6 +74,8 @@ function parseJobFromResult(
   const title = result.title || 'Job Position';
   const url = result.url || '';
   const markdown = result.markdown || result.description || '';
+
+  if (!url) return null;
 
   let company = 'Company';
   const urlMatch = url.match(/https?:\/\/(?:www\.)?([^\/]+)/);
@@ -163,31 +171,62 @@ Deno.serve(async (req) => {
 
     try {
       // Fire parallel searches across job boards
-      const searchPromises = JOB_BOARD_SEARCHES.map((board) => {
-        const fullQuery = board.sites ? `${baseQuery} ${board.sites}` : baseQuery;
-        return searchFirecrawl(apiKey, fullQuery, board.limit, controller.signal)
-          .catch((err) => {
-            if (err.name === 'AbortError') throw err;
-            console.error(`Search failed for ${board.label}:`, err.message);
-            return [] as any[];
-          });
-      });
+      const settled = await Promise.allSettled(
+        JOB_BOARD_SEARCHES.map((board) => {
+          const fullQuery = board.sites ? `${baseQuery} ${board.sites}` : baseQuery;
+          return searchFirecrawl(apiKey, fullQuery, board.limit, controller.signal);
+        })
+      );
 
-      const searchResults = await Promise.all(searchPromises);
+      // Separate successes from failures; propagate AbortError immediately
+      const searchErrors: string[] = [];
+      const searchResults: any[][] = [];
 
-      // Flatten and deduplicate by URL
+      for (let i = 0; i < settled.length; i++) {
+        const entry = settled[i];
+        const label = JOB_BOARD_SEARCHES[i].label;
+        if (entry.status === 'fulfilled') {
+          searchResults.push(entry.value);
+        } else {
+          if (entry.reason?.name === 'AbortError') throw entry.reason;
+          console.error(`Search failed for ${label}:`, entry.reason?.message);
+          searchErrors.push(`${label}: ${entry.reason?.message || 'unknown error'}`);
+          searchResults.push([]);
+        }
+      }
+
+      // If every search failed, surface the error to the client
+      if (searchErrors.length === JOB_BOARD_SEARCHES.length) {
+        const firstError = searchErrors[0];
+        const is429 = firstError.includes('429');
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: is429
+              ? 'Job search rate limit exceeded. Please try again in a moment.'
+              : `All job board searches failed. ${firstError}`,
+          }),
+          {
+            status: is429 ? 429 : 502,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      // Flatten and deduplicate by URL (URL-less results are skipped)
       const seenUrls = new Set<string>();
       const allResults: any[] = [];
       for (const results of searchResults) {
         for (const r of results) {
           const url = (r.url || '').toLowerCase();
-          if (url && seenUrls.has(url)) continue;
-          if (url) seenUrls.add(url);
+          if (!url) continue;
+          if (seenUrls.has(url)) continue;
+          seenUrls.add(url);
           allResults.push(r);
         }
       }
 
-      console.log(`Aggregated ${allResults.length} unique results from ${JOB_BOARD_SEARCHES.length} searches`);
+      console.log(`Aggregated ${allResults.length} unique results from ${JOB_BOARD_SEARCHES.length} searches (${searchErrors.length} failed)`);
 
       let idCounter = 0;
       const jobs: JobListing[] = allResults
@@ -205,6 +244,9 @@ Deno.serve(async (req) => {
           query: baseQuery,
           total: jobs.length,
           sources,
+          warnings: searchErrors.length > 0
+            ? `${searchErrors.length} of ${JOB_BOARD_SEARCHES.length} searches failed`
+            : undefined,
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );

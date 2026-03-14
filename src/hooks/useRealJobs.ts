@@ -46,6 +46,10 @@ export function useRealJobs() {
         throw new Error(data.error || 'Failed to fetch jobs');
       }
 
+      if (data.warnings) {
+        toast.warning(data.warnings);
+      }
+
       const transformedJobs: Job[] = data.jobs.map((job: any) => ({
         id: job.id,
         title: job.title,
