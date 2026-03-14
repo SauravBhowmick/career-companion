@@ -7,22 +7,31 @@ interface FetchJobsOptions {
   query?: string;
   location?: string;
   jobType?: string;
+  forceRefresh?: boolean;
 }
 
 export function useRealJobs() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sources, setSources] = useState<string[]>([]);
   // TODO: supabase.functions.invoke does not support AbortSignal yet —
   // revisit when https://github.com/supabase/supabase-js/issues/797 lands.
-  const cacheRef = useRef<Map<string, { jobs: Job[]; ts: number }>>(new Map());
+  const cacheRef = useRef<Map<string, { jobs: Job[]; sources: string[]; ts: number }>>(new Map());
 
   const fetchJobs = useCallback(async (options: FetchJobsOptions = {}) => {
-    const cacheKey = JSON.stringify(options);
-    const cached = cacheRef.current.get(cacheKey);
-    if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
-      setJobs(cached.jobs);
-      return cached.jobs;
+    const { forceRefresh, ...searchParams } = options;
+    const cacheKey = JSON.stringify(searchParams);
+
+    if (forceRefresh) {
+      cacheRef.current.delete(cacheKey);
+    } else {
+      const cached = cacheRef.current.get(cacheKey);
+      if (cached && Date.now() - cached.ts < 5 * 60 * 1000) {
+        setJobs(cached.jobs);
+        setSources(cached.sources);
+        return cached.jobs;
+      }
     }
 
     setLoading(true);
@@ -30,7 +39,7 @@ export function useRealJobs() {
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke('fetch-jobs', {
-        body: options,
+        body: searchParams,
       });
 
       if (fnError) {
@@ -39,6 +48,10 @@ export function useRealJobs() {
 
       if (!data.success) {
         throw new Error(data.error || 'Failed to fetch jobs');
+      }
+
+      if (data.warnings) {
+        toast.warning(data.warnings);
       }
 
       const transformedJobs: Job[] = data.jobs.map((job: any) => ({
@@ -55,10 +68,13 @@ export function useRealJobs() {
         description: job.description || '',
         requirements: [],
         website: job.url,
+        source: job.source,
       }));
 
+      const fetchedSources: string[] = data.sources || [];
       setJobs(transformedJobs);
-      cacheRef.current.set(cacheKey, { jobs: transformedJobs, ts: Date.now() });
+      setSources(fetchedSources);
+      cacheRef.current.set(cacheKey, { jobs: transformedJobs, sources: fetchedSources, ts: Date.now() });
       return transformedJobs;
     } catch (err: any) {
       const message = err.message || 'Failed to fetch jobs';
@@ -74,6 +90,7 @@ export function useRealJobs() {
     jobs,
     loading,
     error,
+    sources,
     fetchJobs,
   };
 }
