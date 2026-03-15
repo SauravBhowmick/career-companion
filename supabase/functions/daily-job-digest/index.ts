@@ -283,6 +283,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
               results.errors.push(`${maskEmail(profile.email)}: ${emailData.message || "Unknown error"}`);
             } else {
               results.sent++;
+
+              // Persist an in-app notification
+              await supabase.from("notifications").insert({
+                user_id: userPref.user_id,
+                type: "digest",
+                title: `Daily Digest: ${matchingJobs.length} Job${matchingJobs.length > 1 ? "s" : ""}`,
+                body: matchingJobs.slice(0, 3).map((j) => j.title).join(", ") +
+                  (matchingJobs.length > 3 ? ` and ${matchingJobs.length - 3} more` : ""),
+                metadata: { job_count: matchingJobs.length },
+              }).then(({ error: nErr }) => {
+                if (nErr) console.error("Failed to insert digest notification:", nErr.message);
+              });
             }
           } catch (fetchErr: any) {
             results.failed++;

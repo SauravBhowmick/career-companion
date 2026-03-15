@@ -144,6 +144,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     console.log("Job alert email sent successfully:", emailData);
 
+    // Persist an in-app notification for the user
+    const { error: notifError } = await supabase
+      .from("notifications")
+      .insert({
+        user_id: userId,
+        type: "job_alert",
+        title: `${jobs.length} New Job${jobs.length > 1 ? "s" : ""} Found`,
+        body: jobs.slice(0, 3).map((j) => j.title).join(", ") +
+          (jobs.length > 3 ? ` and ${jobs.length - 3} more` : ""),
+        metadata: { job_count: jobs.length, job_ids: jobs.map((j) => j.id) },
+      });
+
+    if (notifError) {
+      console.error("Failed to insert notification row:", notifError.message);
+    }
+
     return new Response(JSON.stringify(emailData), {
       status: 200,
       headers: { "Content-Type": "application/json", ...corsHeaders },
