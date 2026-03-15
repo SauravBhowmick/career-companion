@@ -1,9 +1,10 @@
 import { motion } from "framer-motion";
-import { Bell, Settings, User, Zap, LogOut, Briefcase } from "lucide-react";
+import { Settings, User, Zap, LogOut, Briefcase } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
+import { NotificationPanel } from "@/components/NotificationPanel";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,12 +71,7 @@ export function Header({ onOpenProfile, onOpenSettings, onOpenAuth }: HeaderProp
         <div className="flex items-center gap-2">
           {user ? (
             <>
-              <Button variant="ghost" size="icon" className="relative">
-                <Bell className="h-5 w-5" />
-                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-accent text-[10px] font-bold flex items-center justify-center text-accent-foreground">
-                  3
-                </span>
-              </Button>
+              <NotificationPanel />
               <Button variant="ghost" size="icon" onClick={onOpenSettings}>
                 <Settings className="h-5 w-5" />
               </Button>

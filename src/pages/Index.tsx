@@ -16,6 +16,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useJobApplications } from "@/hooks/useJobApplications";
 import { useRealJobs } from "@/hooks/useRealJobs";
 import { useJobMatcher } from "@/hooks/useJobMatcher";
+import { useNotifications } from "@/hooks/useNotifications";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -24,6 +25,7 @@ const Index = () => {
   const { applyToJob, saveJob, isJobSaved, applications } = useJobApplications();
   const { jobs: realJobs, loading: loadingRealJobs, sources: jobSources, fetchJobs } = useRealJobs();
   const { matchJobs, matching } = useJobMatcher();
+  const { push: pushNotification } = useNotifications();
   const [matchedJobs, setMatchedJobs] = useState<Job[]>([]);
   
   const [searchQuery, setSearchQuery] = useState("");
@@ -111,18 +113,26 @@ const Index = () => {
     runMatch(currentJobs, jobsKey);
   }, [currentJobs, user, runMatch]);
 
-  const handleFetchRealJobs = () => {
+  const handleFetchRealJobs = async () => {
     const isRefresh = useRealData;
     if (!isRefresh) {
       skipNextEffectRef.current = true;
     }
     setUseRealData(true);
-    fetchJobs({
+    const jobs = await fetchJobs({
       query: searchQuery || 'software developer',
       location: filters.locations[0],
       jobType: filters.jobTypes[0],
       forceRefresh: isRefresh,
     });
+    if (jobs && jobs.length > 0) {
+      pushNotification({
+        type: 'job_alert',
+        title: `Found ${jobs.length} job${jobs.length > 1 ? 's' : ''}`,
+        body: jobs.slice(0, 3).map(j => j.title).join(', ') + (jobs.length > 3 ? ` and ${jobs.length - 3} more` : ''),
+        href: '/',
+      });
+    }
   };
 
   const handleRefreshMatching = async () => {
@@ -135,6 +145,15 @@ const Index = () => {
     const matched = await matchJobs(jobsToMatch);
     setMatchedJobs(matched);
     toast.success("Match scores updated based on your profile!");
+    const topMatch = matched.reduce((best, j) => (j.matchScore || 0) > (best.matchScore || 0) ? j : best, matched[0]);
+    pushNotification({
+      type: 'match',
+      title: 'AI Matching Complete',
+      body: topMatch?.matchScore
+        ? `Top match: ${topMatch.title} (${topMatch.matchScore}% match)`
+        : `Matched ${matched.length} jobs to your profile`,
+      href: '/',
+    });
   };
 
   const activeJobs = matchedJobs.length > 0 ? matchedJobs : (useRealData ? realJobs : mockJobs);
@@ -186,6 +205,12 @@ const Index = () => {
   const handleApplyConfirm = (autoApplySimilar: boolean) => {
     if (applyJob) {
       applyToJob(applyJob, autoApplySimilar);
+      pushNotification({
+        type: 'application',
+        title: `Applied to ${applyJob.title}`,
+        body: `Your application at ${applyJob.company} has been submitted.`,
+        href: '/applications',
+      });
     }
     setApplyJob(null);
   };
