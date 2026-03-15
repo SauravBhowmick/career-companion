@@ -192,15 +192,14 @@ Deno.serve(async (req) => {
     }
 
     // Persist an in-app notification
-    await supabase.from("notifications").insert({
+    const { error: nErr } = await supabase.from("notifications").insert({
       user_id: user.id,
       type: "application",
       title: `Application Sent: ${sanitizePlainText(jobTitle)}`,
       body: `Your application for ${sanitizePlainText(jobTitle)} at ${sanitizePlainText(company || "Unknown")} was submitted.`,
       metadata: { job_title: jobTitle, company },
-    }).then(({ error: nErr }) => {
-      if (nErr) console.error("Failed to insert application notification:", nErr.message);
     });
+    if (nErr) console.error("Failed to insert application notification:", nErr.message);
 
     return new Response(JSON.stringify({ success: true, ...emailData }), {
       status: 200,

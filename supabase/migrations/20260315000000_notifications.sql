@@ -24,6 +24,10 @@ CREATE POLICY "Users can update own notifications"
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 
+CREATE POLICY "Users can delete own notifications"
+  ON public.notifications FOR DELETE
+  USING (auth.uid() = user_id);
+
 -- Service-role inserts bypass RLS; no INSERT policy needed for end users.
 
 -- Auto-create a welcome notification when a new user signs up

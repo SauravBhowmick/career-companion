@@ -284,8 +284,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
             } else {
               results.sent++;
 
-              // Persist an in-app notification
-              await supabase.from("notifications").insert({
+              // Persist an in-app notification (fire-and-forget)
+              supabase.from("notifications").insert({
                 user_id: userPref.user_id,
                 type: "digest",
                 title: `Daily Digest: ${matchingJobs.length} Job${matchingJobs.length > 1 ? "s" : ""}`,

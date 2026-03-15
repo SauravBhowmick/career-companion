@@ -43,7 +43,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { userId, jobs }: JobAlertRequest = await req.json();
+    // Verify caller identity via JWT
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Missing or invalid Authorization header" }),
+        { status: 401, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    const jwt = authHeader.replace("Bearer ", "");
+    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(jwt);
+
+    if (authError || !authUser) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized: invalid or expired token" }),
+        { status: 401, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    const { jobs }: JobAlertRequest = await req.json();
+    const userId = authUser.id;
 
     const [{ data: profile, error: profileError }, { data: preferences }] = await Promise.all([
       supabase.from("profiles").select("email, full_name").eq("user_id", userId).single(),

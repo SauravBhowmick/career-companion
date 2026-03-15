@@ -19,15 +19,12 @@ export interface NotificationContextValue {
   markAllAsRead: () => void;
 }
 
-export const NotificationContext = createContext<NotificationContextValue>({
-  notifications: [],
-  unreadCount: 0,
-  loading: false,
-  push: () => {},
-  markAsRead: () => {},
-  markAllAsRead: () => {},
-});
+export const NotificationContext = createContext<NotificationContextValue | null>(null);
 
-export function useNotifications() {
-  return useContext(NotificationContext);
+export function useNotifications(): NotificationContextValue {
+  const ctx = useContext(NotificationContext);
+  if (!ctx) {
+    throw new Error('useNotifications must be used within a NotificationProvider');
+  }
+  return ctx;
 }
