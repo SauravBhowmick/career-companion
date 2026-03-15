@@ -58,7 +58,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
   }, [user]);
 
-  // Fetch DB notifications + create welcome notification on login
+  // Fetch DB notifications on login / user change
   useEffect(() => {
     if (!user) {
       setNotifications([]);
@@ -66,8 +66,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const justLoggedIn = prevUserRef.current !== user.id;
     prevUserRef.current = user.id;
+    const userId = user.id;
+    let cancelled = false;
 
     const fetchFromDb = async () => {
       setLoading(true);
@@ -75,11 +76,24 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         const { data, error } = await supabase
           .from('notifications')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('user_id', userId)
           .order('created_at', { ascending: false })
           .limit(50);
 
-        if (!error && data) {
+        if (cancelled || prevUserRef.current !== userId) return;
+
+        if (error) {
+          const isRelationMissing =
+            typeof error.message === 'string' &&
+            error.message.includes('relation') &&
+            error.message.includes('does not exist');
+          if (!isRelationMissing) {
+            console.error('Failed to fetch notifications:', error);
+          }
+          return;
+        }
+
+        if (data) {
           const dbNotifs: AppNotification[] = data.map((row: any) => ({
             id: row.id,
             type: row.type,
@@ -94,31 +108,20 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             return [...locals, ...dbNotifs].slice(0, 50);
           });
         }
-      } catch {
-        // Table may not exist yet — that's OK
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Notification fetch error:', err);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchFromDb();
 
-    if (justLoggedIn) {
-      // Always push a local welcome so there's content immediately
-      setNotifications((prev) => {
-        if (prev.some((n) => n.type === 'welcome')) return prev;
-        const welcome: AppNotification = {
-          id: `local-${++idSeq}-welcome`,
-          type: 'welcome',
-          title: 'Welcome to JobFlow!',
-          body: 'Upload your CV, set preferences, and fetch real jobs to get started.',
-          read: false,
-          href: '/',
-          created_at: new Date().toISOString(),
-        };
-        return [welcome, ...prev];
-      });
-    }
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   // Realtime subscription for server-pushed notifications

@@ -29,7 +29,9 @@ CREATE POLICY "Users can update own notifications"
 -- Auto-create a welcome notification when a new user signs up
 CREATE OR REPLACE FUNCTION public.handle_new_user_notification()
 RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
 BEGIN
   INSERT INTO public.notifications (user_id, type, title, body)
