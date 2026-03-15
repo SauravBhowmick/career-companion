@@ -109,12 +109,7 @@ export function NotificationPanel() {
           variant="ghost"
           size="icon"
           className="relative"
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative"
-          aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ""}`}
         >
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
