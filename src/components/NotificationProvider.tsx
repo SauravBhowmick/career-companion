@@ -32,17 +32,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
-    // Persist to DB if it's a server-side notification (non-local)
-    if (!id.startsWith('local-')) {
-      supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('id', id)
-        .then(({ error }) => {
-          if (error) console.error('Failed to mark notification as read:', error);
-        });
-    }
-  }, []);
+    if (!user || id.startsWith('local-')) return;
+    supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .then(({ error }) => {
+        if (error) console.error('Failed to mark notification as read:', error);
+      });
+  }, [user]);
 
   const markAllAsRead = useCallback(() => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
@@ -62,6 +61,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) {
       setNotifications([]);
+      setLoading(false);
       prevUserRef.current = null;
       return;
     }

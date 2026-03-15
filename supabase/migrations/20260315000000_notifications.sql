@@ -10,8 +10,14 @@ CREATE TABLE public.notifications (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 
+-- Primary fetch index: WHERE user_id = ? ORDER BY created_at DESC LIMIT 50
+CREATE INDEX idx_notifications_user_timeline
+  ON public.notifications (user_id, created_at DESC);
+
+-- Lightweight partial index for "mark all unread" queries
 CREATE INDEX idx_notifications_user_unread
-  ON public.notifications (user_id, read, created_at DESC);
+  ON public.notifications (user_id)
+  WHERE read = false;
 
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
@@ -23,6 +29,10 @@ CREATE POLICY "Users can update own notifications"
   ON public.notifications FOR UPDATE
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
+
+-- Restrict authenticated users to only updating the read column
+REVOKE UPDATE ON public.notifications FROM authenticated;
+GRANT UPDATE (read) ON public.notifications TO authenticated;
 
 CREATE POLICY "Users can delete own notifications"
   ON public.notifications FOR DELETE
