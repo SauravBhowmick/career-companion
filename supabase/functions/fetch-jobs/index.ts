@@ -87,11 +87,11 @@ async function searchFirecrawl(
     );
   }
 
+  const raw = await response.text();
   let data: any;
   try {
-    data = await response.json();
+    data = JSON.parse(raw);
   } catch {
-    const raw = await response.text().catch(() => '');
     throw new Error(
       `Firecrawl ${response.status}: malformed JSON – ${raw.substring(0, 200)}`
     );
