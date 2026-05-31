@@ -43,11 +43,11 @@ async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   try {
     const currentYear = new Date().getFullYear();
-    const response = await fetch("https://api.firecrawl.dev/v1/search", {
+    const response = await fetch("https://api.firecrawl.dev/v2/search", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
@@ -56,10 +56,10 @@ async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
       body: JSON.stringify({
         query: `${query} jobs hiring ${currentYear}`,
         limit: 10,
-        lang: "en",
-        country: "us",
-        tbs: "qdr:d",
-        scrapeOptions: { formats: ["markdown"] },
+        sources: [{ type: "web" }],
+        tbs: "qdr:w",
+        timeout: 25000,
+        scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
       }),
       signal: controller.signal,
     });
@@ -67,30 +67,53 @@ async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
     if (!response.ok) return [];
 
     const data = await response.json();
-    return (data.data || []).map((result: any, index: number) => {
-      const url = result.url || "";
+    // v2 nests web results under data.web; fall back to flat data array.
+    const results: any[] = Array.isArray(data?.data?.web)
+      ? data.data.web
+      : Array.isArray(data?.web)
+        ? data.web
+        : Array.isArray(data?.data)
+          ? data.data
+          : [];
+
+    const batchTs = Date.now();
+    return results.map((result: any, index: number) => {
+      const url = typeof result.url === "string" ? result.url : "";
+      const title = typeof result.title === "string" ? result.title : "Job Position";
+
+      // Derive company: aggregator titles ("Company hiring ...", "Title - Company")
+      // are more reliable than the host name.
       let company = "Company";
-      const urlMatch = url.match(/https?:\/\/(?:www\.)?([^/]+)/);
-      if (urlMatch) {
-        company = urlMatch[1].replace(".com", "").replace(".io", "");
-        company = company.charAt(0).toUpperCase() + company.slice(1);
+      const hiring = title.match(/^(.+?)\s+hiring\b/i);
+      const segs = title.split(/\s[-–|·]\s/).map((s: string) => s.trim()).filter(Boolean);
+      if (hiring && hiring[1].trim().length >= 2 && hiring[1].trim().length <= 80) {
+        company = hiring[1].trim();
+      } else if (segs.length >= 2 && segs[1].length >= 2 && segs[1].length <= 80) {
+        company = segs[1];
+      } else {
+        const urlMatch = url.match(/https?:\/\/(?:www\.)?([^/]+)/);
+        if (urlMatch) {
+          const sld = urlMatch[1].split(".").slice(-2, -1)[0] || urlMatch[1];
+          company = sld.charAt(0).toUpperCase() + sld.slice(1);
+        }
       }
 
       const rawLocation = (
         result.location || result.city || result.place || ""
-      ).trim();
+      ).toString().trim();
       const location = rawLocation || "Unknown";
 
       return {
-        id: `digest-${Date.now()}-${index}`,
-        title: (result.title || "Job Position").replace(/\s+[-|]\s+.*$/, "").trim().substring(0, 100),
+        id: `digest-${batchTs}-${index}`,
+        title: title.replace(/\s+[-|–·]\s+.*$/, "").trim().substring(0, 100),
         company,
         location,
       };
     }).filter((j: DigestJob) =>
       j.title &&
       j.title.toLowerCase() !== "job position" &&
-      !j.title.toLowerCase().includes("sign in")
+      !j.title.toLowerCase().includes("sign in") &&
+      !j.title.toLowerCase().includes("log in")
     );
   } catch {
     return [];
