@@ -20,6 +20,7 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
   const [autoApplySimilar, setAutoApplySimilar] = useState(true);
   const [isApplied, setIsApplied] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(true);
   const [formData, setFormData] = useState({
     phone: "",
     coverLetter: "",
@@ -32,6 +33,11 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
     }
 
     setIsLoading(true);
+
+    // The confirmation email is best-effort — it must NOT block recording the
+    // application. If the email service is unavailable (e.g. RESEND_API_KEY not
+    // configured), the application is still submitted.
+    let sent = false;
     try {
       const { data, error } = await supabase.functions.invoke("send-application-email", {
         body: {
@@ -41,24 +47,28 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
           coverLetter: formData.coverLetter,
         },
       });
-
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-
-      setIsApplied(true);
-      setTimeout(() => {
-        onConfirm(autoApplySimilar);
-        setIsApplied(false);
-        setFormData({ phone: "", coverLetter: "" });
-      }, 1500);
-
-      toast.success("Application sent! Check your email for confirmation.");
-    } catch (error) {
-      toast.error("Failed to send application. Please try again.");
-      console.error(error);
-    } finally {
-      setIsLoading(false);
+      sent = !error && !data?.error;
+      if (!sent) {
+        console.warn("Confirmation email not sent:", error?.message || data?.error);
+      }
+    } catch (err) {
+      console.warn("Confirmation email failed:", err);
     }
+
+    setEmailSent(sent);
+    setIsLoading(false);
+    setIsApplied(true);
+    toast.success(
+      sent
+        ? "Application sent! Check your email for confirmation."
+        : "Application submitted!"
+    );
+
+    setTimeout(() => {
+      onConfirm(autoApplySimilar);
+      setIsApplied(false);
+      setFormData({ phone: "", coverLetter: "" });
+    }, 1500);
   };
 
   if (!job) return null;
@@ -96,7 +106,9 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
                 </motion.div>
                 <h3 className="font-display text-xl font-semibold">Application Sent!</h3>
                 <p className="mt-2 text-muted-foreground">
-                  A confirmation email has been sent to your account email.
+                  {emailSent
+                    ? "A confirmation email has been sent to your account email."
+                    : "Your application has been recorded."}
                 </p>
                 <p className="mt-3 text-sm text-muted-foreground">
                   {autoApplySimilar
