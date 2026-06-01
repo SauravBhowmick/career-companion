@@ -63,6 +63,9 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
     // configured), the application is still submitted.
     let sent = false;
     let failReason = "";
+    let failStatus: number | undefined;
+    let failRaw = "";
+    let originalError: unknown;
     try {
       const { data, error } = await supabase.functions.invoke("send-application-email", {
         body: {
@@ -74,29 +77,38 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
       });
 
       if (error) {
-        // FunctionsHttpError carries the function's actual response body; the
-        // top-level error.message is only a generic "non-2xx status" string.
+        originalError = error;
+        // FunctionsHttpError carries the function's actual Response on
+        // error.context; the top-level error.message is only a generic
+        // "non-2xx status" string.
         if (error instanceof FunctionsHttpError) {
+          failStatus = error.context.status;
+          // Read the body once as text, then attempt JSON — non-JSON bodies
+          // (e.g. plain-text gateway errors) would otherwise be lost.
+          failRaw = await error.context.text().catch(() => "");
           try {
-            const body = await error.context.json();
-            failReason = body?.error || error.message;
+            const body = JSON.parse(failRaw);
+            failReason = body?.error || body?.message || "";
           } catch {
-            failReason = error.message;
+            failReason = failRaw;
           }
-        } else {
-          failReason = error.message;
         }
+        if (!failReason) failReason = error.message || "Unknown error";
       } else if (data?.error) {
         failReason = data.error;
       } else {
         sent = true;
       }
     } catch (err: any) {
+      originalError = err;
       failReason = err?.message || "Network error";
     }
 
     if (!sent) {
-      console.warn("Confirmation email not sent:", failReason);
+      console.warn(
+        `Confirmation email not sent${failStatus ? ` (HTTP ${failStatus})` : ""}: ${failReason}`,
+        { raw: failRaw.substring(0, 500), error: originalError }
+      );
     }
 
     // Record the application immediately — closing the modal can no longer drop it.
