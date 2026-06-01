@@ -202,17 +202,14 @@ const Index = () => {
     saveJob(job);
   };
 
-  const handleApplyConfirm = (autoApplySimilar: boolean) => {
-    if (applyJob) {
-      applyToJob(applyJob, autoApplySimilar);
-      pushNotification({
-        type: 'application',
-        title: `Applied to ${applyJob.title}`,
-        body: `Your application at ${applyJob.company} has been submitted.`,
-        href: '/applications',
-      });
-    }
-    setApplyJob(null);
+  const handleApplyConfirm = (job: Job, autoApplySimilar: boolean) => {
+    applyToJob(job, autoApplySimilar);
+    pushNotification({
+      type: 'application',
+      title: `Applied to ${job.title}`,
+      body: `Your application at ${job.company} has been submitted.`,
+      href: '/applications',
+    });
   };
 
   const stats = {
