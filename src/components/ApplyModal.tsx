@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Job } from "@/types/job";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -13,52 +13,85 @@ interface ApplyModalProps {
   job: Job | null;
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (autoApplySimilar: boolean) => void;
+  onConfirm: (job: Job, autoApplySimilar: boolean) => void;
 }
 
 export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps) {
   const [autoApplySimilar, setAutoApplySimilar] = useState(true);
   const [isApplied, setIsApplied] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(true);
   const [formData, setFormData] = useState({
     phone: "",
     coverLetter: "",
   });
+  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending auto-close timer on unmount so it can't fire late.
+  useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    };
+  }, []);
+
+  const resetAndClose = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+    setIsApplied(false);
+    setIsLoading(false);
+    setFormData({ phone: "", coverLetter: "" });
+    onClose();
+  };
 
   const handleApply = async () => {
+    if (!job) return;
     if (!formData.phone) {
       toast.error("Please provide your phone number");
       return;
     }
 
+    // Capture the job up front so the recorded application never depends on
+    // parent state that may be cleared while the success view animates.
+    const appliedJob = job;
     setIsLoading(true);
+
+    // The confirmation email is best-effort — it must NOT block recording the
+    // application. If the email service is unavailable (e.g. RESEND_API_KEY not
+    // configured), the application is still submitted.
+    let sent = false;
     try {
       const { data, error } = await supabase.functions.invoke("send-application-email", {
         body: {
-          jobTitle: job?.title,
-          company: job?.company,
+          jobTitle: appliedJob.title,
+          company: appliedJob.company,
           applicantPhone: formData.phone,
           coverLetter: formData.coverLetter,
         },
       });
-
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-
-      setIsApplied(true);
-      setTimeout(() => {
-        onConfirm(autoApplySimilar);
-        setIsApplied(false);
-        setFormData({ phone: "", coverLetter: "" });
-      }, 1500);
-
-      toast.success("Application sent! Check your email for confirmation.");
-    } catch (error) {
-      toast.error("Failed to send application. Please try again.");
-      console.error(error);
-    } finally {
-      setIsLoading(false);
+      sent = !error && !data?.error;
+      if (!sent) {
+        console.warn("Confirmation email not sent:", error?.message || data?.error);
+      }
+    } catch (err) {
+      console.warn("Confirmation email failed:", err);
     }
+
+    // Record the application immediately — closing the modal can no longer drop it.
+    onConfirm(appliedJob, autoApplySimilar);
+
+    setEmailSent(sent);
+    setIsLoading(false);
+    setIsApplied(true);
+    if (sent) {
+      toast.success("Application sent! Check your email for confirmation.");
+    } else {
+      toast.warning("Application recorded — confirmation email could not be sent.");
+    }
+
+    // Auto-close the success view after the animation; safe to clear on early close.
+    closeTimeoutRef.current = setTimeout(resetAndClose, 1500);
   };
 
   if (!job) return null;
@@ -71,7 +104,7 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
-          onClick={onClose}
+          onClick={resetAndClose}
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -94,9 +127,13 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
                 >
                   <CheckCircle className="h-10 w-10 text-success-foreground" />
                 </motion.div>
-                <h3 className="font-display text-xl font-semibold">Application Sent!</h3>
+                <h3 className="font-display text-xl font-semibold">
+                  {emailSent ? "Application Sent!" : "Application Submitted!"}
+                </h3>
                 <p className="mt-2 text-muted-foreground">
-                  A confirmation email has been sent to your account email.
+                  {emailSent
+                    ? "A confirmation email has been sent to your account email."
+                    : "Your application has been recorded."}
                 </p>
                 <p className="mt-3 text-sm text-muted-foreground">
                   {autoApplySimilar
@@ -108,7 +145,7 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
               <>
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="font-display text-xl font-semibold">Apply to Position</h2>
-                  <Button variant="ghost" size="icon" onClick={onClose}>
+                  <Button variant="ghost" size="icon" onClick={resetAndClose}>
                     <X className="h-5 w-5" />
                   </Button>
                 </div>
@@ -206,7 +243,7 @@ export function ApplyModal({ job, isOpen, onClose, onConfirm }: ApplyModalProps)
                   </motion.div>
 
                   <div className="flex gap-3">
-                    <Button variant="outline" className="flex-1" onClick={onClose} disabled={isLoading}>
+                    <Button variant="outline" className="flex-1" onClick={resetAndClose} disabled={isLoading}>
                       Cancel
                     </Button>
                     <Button variant="hero" className="flex-1" onClick={handleApply} disabled={isLoading}>
