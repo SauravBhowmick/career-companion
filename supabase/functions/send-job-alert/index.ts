@@ -1,4 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  buildUnsubscribeUrl,
+  buildListUnsubscribeUrl,
+} from "../_shared/unsubscribe.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
@@ -81,6 +85,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
+    const [unsubscribeUrl, listUnsubscribeUrl] = await Promise.all([
+      buildUnsubscribeUrl(userId),
+      buildListUnsubscribeUrl(userId),
+    ]);
+
     const jobListHtml = jobs
       .map(
         (job) => `
@@ -113,6 +122,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
           from: "Job Alerts <onboarding@resend.dev>",
           to: [profile.email],
           subject: `${jobs.length} New Job${jobs.length > 1 ? "s" : ""} Matching Your Profile`,
+          headers: {
+            "List-Unsubscribe": `<${listUnsubscribeUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          },
           html: `
             <!DOCTYPE html>
             <html>
@@ -132,9 +145,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
                   ${jobListHtml}
                 </table>
                 <div style="padding: 24px; text-align: center; background: #f9fafb;">
-                  <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                  <p style="color: #6b7280; font-size: 12px; margin: 0 0 12px 0;">
                     You're receiving this because you enabled job alerts.<br>
-                    Manage your notification preferences in your account settings.
+                    Manage preferences in your JobFlow account settings.
+                  </p>
+                  <p style="margin: 0;">
+                    <a href="${unsubscribeUrl}" style="color: #6b7280; font-size: 12px; text-decoration: underline;">
+                      Unsubscribe from these emails
+                    </a>
                   </p>
                 </div>
               </div>
