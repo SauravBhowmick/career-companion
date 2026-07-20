@@ -134,7 +134,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <div>
                         <Label className="font-medium">Email Notifications</Label>
                         <p className="text-sm text-muted-foreground">
-                          Get daily digest of new matching jobs
+                          Job alerts &amp; daily digests — turn off anytime (or use Unsubscribe in emails)
                         </p>
                       </div>
                     </div>

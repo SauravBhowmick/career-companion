@@ -1,1 +1,6 @@
 project_id = "cglujcvismpplshvztcn"
+
+# Public unsubscribe endpoint — must accept unauthenticated one-click POSTs
+# from email clients (RFC 8058) and token links without a user session.
+[functions.unsubscribe]
+verify_jwt = false

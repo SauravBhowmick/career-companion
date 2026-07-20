@@ -1,4 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  buildUnsubscribeUrl,
+  buildListUnsubscribeUrl,
+} from "../_shared/unsubscribe.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
@@ -258,6 +262,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
             .join("");
 
           const safeName = escapeHtml(profile.full_name || "there");
+          const [unsubscribeUrl, listUnsubscribeUrl] = await Promise.all([
+            buildUnsubscribeUrl(userPref.user_id),
+            buildListUnsubscribeUrl(userPref.user_id),
+          ]);
 
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS);
@@ -273,6 +281,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
                 from: "Job Alerts <onboarding@resend.dev>",
                 to: [profile.email],
                 subject: `Daily Job Digest: ${matchingJobs.length} New Matching Job${matchingJobs.length > 1 ? "s" : ""}`,
+                headers: {
+                  "List-Unsubscribe": `<${listUnsubscribeUrl}>`,
+                  "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+                },
                 html: `
                   <!DOCTYPE html>
                   <html>
@@ -287,9 +299,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
                       </div>
                       <table style="width: 100%; border-collapse: collapse;">${jobListHtml}</table>
                       <div style="padding: 24px; text-align: center; background: #f9fafb;">
-                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0 0 12px 0;">
                           You're receiving this daily digest because you enabled job alerts.<br>
-                          Manage your notification preferences in your account settings.
+                          Manage preferences in your JobFlow account settings.
+                        </p>
+                        <p style="margin: 0;">
+                          <a href="${unsubscribeUrl}" style="color: #6b7280; font-size: 12px; text-decoration: underline;">
+                            Unsubscribe from these emails
+                          </a>
                         </p>
                       </div>
                     </div>
