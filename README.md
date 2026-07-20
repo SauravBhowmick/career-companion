@@ -267,6 +267,9 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-key
 | `LOVABLE_API_KEY` | match-jobs, parse-cv |
 | `RESEND_API_KEY` | send-application-email, send-job-alert, daily-job-digest |
 | `CRON_SECRET` | daily-job-digest |
+| `UNSUBSCRIBE_SECRET` | unsubscribe, send-job-alert, daily-job-digest (token HMAC; required) |
+| `UNSUBSCRIBE_SECRET_PREVIOUS` | unsubscribe (optional; key rotation verify) |
+| `APP_URL` or `SITE_URL` | unsubscribe link origin in emails (required in production) |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | all functions |
 
 ---

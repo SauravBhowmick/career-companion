@@ -14,7 +14,14 @@ export default function Unsubscribe() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setStatus("missing");
+      setMessage("");
+      return;
+    }
+
+    setStatus("loading");
+    setMessage("");
 
     let cancelled = false;
 

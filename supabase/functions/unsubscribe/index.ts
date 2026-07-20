@@ -58,7 +58,6 @@ async function unsubscribeUser(userId: string) {
     .from("user_preferences")
     .update({
       email_notifications: false,
-      instant_notifications: false,
     })
     .eq("user_id", userId);
 
@@ -131,13 +130,13 @@ Deno.serve(async (req: Request) => {
     if (wantsJson) {
       return json({
         success: true,
-        message: "You have been unsubscribed from JobFlow emails.",
+        message: "You have been unsubscribed from JobFlow email alerts and digests.",
       });
     }
 
     return htmlPage(
       "You're unsubscribed",
-      "You will no longer receive job alert or digest emails from JobFlow. You can re-enable them anytime in Settings.",
+      "You will no longer receive job alert or digest emails from JobFlow. Instant in-app alerts are unchanged — manage them in Settings. You can re-enable emails anytime there too.",
       true
     );
   } catch (error: any) {
