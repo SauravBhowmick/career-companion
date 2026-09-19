@@ -48,35 +48,40 @@ function maskEmail(email: string): string {
 }
 
 async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
   const batchTs = Date.now();
 
-  try {
-    // Prefer structured partner APIs when configured.
-    if (HAS_STRUCTURED_APIS) {
-      try {
-        const structured = await searchStructuredJobApis({
-          query,
-          limit: 10,
-          signal: controller.signal,
-        });
-        if (structured.jobs.length > 0) {
-          return structured.jobs.map((job, index) => ({
-            id: job.id || `digest-${batchTs}-${index}`,
-            title: job.title,
-            company: job.company,
-            location: job.location || "Unknown",
-            salary: job.salary,
-          }));
-        }
-      } catch (err) {
-        console.warn("Structured job APIs failed for digest:", err);
+  // Prefer structured partner APIs when configured (own timeout budget).
+  if (HAS_STRUCTURED_APIS) {
+    const structuredController = new AbortController();
+    const structuredTimeoutId = setTimeout(() => structuredController.abort(), 15_000);
+    try {
+      const structured = await searchStructuredJobApis({
+        query,
+        limit: 10,
+        signal: structuredController.signal,
+      });
+      if (structured.jobs.length > 0) {
+        return structured.jobs.map((job, index) => ({
+          id: job.id || `digest-${batchTs}-${index}`,
+          title: job.title,
+          company: job.company,
+          location: job.location || "Unknown",
+          salary: job.salary,
+        }));
       }
+    } catch (err) {
+      console.warn("Structured job APIs failed for digest:", err);
+    } finally {
+      clearTimeout(structuredTimeoutId);
     }
+  }
 
-    if (!FIRECRAWL_API_KEY) return [];
+  if (!FIRECRAWL_API_KEY) return [];
 
+  // Firecrawl fallback gets a fresh timeout signal (not shared with structured phase).
+  const firecrawlController = new AbortController();
+  const firecrawlTimeoutId = setTimeout(() => firecrawlController.abort(), 15_000);
+  try {
     const currentYear = new Date().getFullYear();
     const response = await fetch("https://api.firecrawl.dev/v2/search", {
       method: "POST",
@@ -89,17 +94,24 @@ async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
         limit: 10,
         sources: [{ type: "web" }],
         tbs: "qdr:w",
-        timeout: 25000,
+        timeout: 14000,
         scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
       }),
-      signal: controller.signal,
+      signal: firecrawlController.signal,
     });
 
     if (!response.ok) return [];
 
     const data = await response.json();
+    interface DigestFirecrawlHit {
+      url?: string;
+      title?: string;
+      location?: string;
+      city?: string;
+      place?: string;
+    }
     // v2 nests web results under data.web; fall back to flat data array.
-    const results: any[] = Array.isArray(data?.data?.web)
+    const results: DigestFirecrawlHit[] = Array.isArray(data?.data?.web)
       ? data.data.web
       : Array.isArray(data?.web)
         ? data.web
@@ -107,7 +119,7 @@ async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
           ? data.data
           : [];
 
-    return results.map((result: any, index: number) => {
+    return results.map((result, index) => {
       const url = typeof result.url === "string" ? result.url : "";
       const title = typeof result.title === "string" ? result.title : "Job Position";
 
@@ -148,9 +160,10 @@ async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
   } catch {
     return [];
   } finally {
-    clearTimeout(timeoutId);
+    clearTimeout(firecrawlTimeoutId);
   }
 }
+
 
 const DEV_FALLBACK_JOBS: DigestJob[] = [
   { id: "fb-1", title: "Senior Frontend Developer", company: "TechCorp Inc", location: "Remote", salary: "$120k - $150k", matchScore: 95 },

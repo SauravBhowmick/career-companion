@@ -81,9 +81,11 @@ export function JobCard({ job, index, onApply, onSave, isSaved }: JobCardProps) 
               <MapPin className="h-4 w-4" />
               <span>{job.location}</span>
             </div>
-            <Badge variant="secondary" className="text-xs">
-              {job.type}
-            </Badge>
+            {job.type ? (
+              <Badge variant="secondary" className="text-xs">
+                {job.type}
+              </Badge>
+            ) : null}
             {job.source && (
               <Badge variant="outline" className="text-xs text-primary border-primary/30">
                 {job.source}

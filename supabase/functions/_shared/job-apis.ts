@@ -67,16 +67,40 @@ export function defaultEuAdzunaCountries(): string[] {
     .filter((c) => ADZUNA_COUNTRIES.has(c));
 }
 
+/** Query params stripped for dedupe (tracking only; path casing preserved). */
+const TRACKING_QUERY_PARAMS = new Set([
+  "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "twclid", "li_fat_id",
+  "mc_cid", "mc_eid", "igshid", "yclid",
+  "ref", "refid", "referrer", "source", "src", "trk", "trackingid", "campaignid",
+]);
+
+function isTrackingQueryParam(key: string): boolean {
+  const k = key.toLowerCase();
+  if (TRACKING_QUERY_PARAMS.has(k)) return true;
+  if (k.startsWith("utm_")) return true;
+  if (k.startsWith("mtm_")) return true;
+  if (k.startsWith("pk_")) return true;
+  return false;
+}
+
 export function normalizeUrl(raw: string): string {
   try {
     const u = new URL(raw);
-    u.search = "";
     u.hash = "";
-    let s = u.toString().toLowerCase();
-    if (s.endsWith("/")) s = s.slice(0, -1);
+    u.username = "";
+    u.password = "";
+    u.hostname = u.hostname.toLowerCase();
+    // Drop tracking params only; keep job IDs and other meaningful query values.
+    for (const key of [...u.searchParams.keys()]) {
+      if (isTrackingQueryParam(key)) u.searchParams.delete(key);
+    }
+    let s = u.toString();
+    if (s.endsWith("?")) s = s.slice(0, -1);
+    if (u.pathname !== "/" && s.endsWith("/")) s = s.slice(0, -1);
     return s;
   } catch {
-    return raw.toLowerCase().split("?")[0].split("#")[0].replace(/\/+$/, "");
+    // Preserve path casing; strip hash and trailing slash only.
+    return raw.split("#")[0].replace(/\/+$/, "");
   }
 }
 
@@ -96,21 +120,25 @@ function formatSalaryRange(
   if (min != null && max != null && min !== max) {
     return `${prefix}${fmt(min)}–${prefix}${fmt(max)}`;
   }
-  return `${prefix}${fmt(min ?? max!)}+`;
+  if (min != null) {
+    return `${prefix}${fmt(min)}+`;
+  }
+  return `up to ${prefix}${fmt(max!)}`;
 }
 
 function mapContractType(
   contractType?: string | null,
   contractTime?: string | null,
-  jobTypeHint?: string,
-): string {
-  const blob =
-    `${contractType || ""} ${contractTime || ""} ${jobTypeHint || ""}`.toLowerCase();
+): string | undefined {
+  const blob = `${contractType || ""} ${contractTime || ""}`.toLowerCase();
+  if (!blob.trim()) return undefined;
   if (blob.includes("remote")) return "Remote";
   if (blob.includes("hybrid")) return "Hybrid";
   if (blob.includes("part")) return "Part-time";
   if (blob.includes("contract") || blob.includes("temporary")) return "Contract";
-  return "Full-time";
+  if (blob.includes("full")) return "Full-time";
+  if (blob.includes("permanent")) return "Full-time";
+  return undefined;
 }
 
 function currencyForCountry(country: string): string {
@@ -128,6 +156,42 @@ export function hasAdzunaCredentials(): boolean {
 
 export function hasJoobleCredentials(): boolean {
   return !!Deno.env.get("JOOBLE_API_KEY");
+}
+
+
+interface AdzunaCompany {
+  display_name?: string;
+}
+
+interface AdzunaLocation {
+  display_name?: string;
+}
+
+interface AdzunaJobResult {
+  title?: string;
+  redirect_url?: string;
+  url?: string;
+  company?: AdzunaCompany;
+  location?: AdzunaLocation;
+  salary_min?: number;
+  salary_max?: number;
+  description?: string;
+  contract_type?: string;
+  contract_time?: string;
+  created?: string;
+}
+
+interface JoobleJobResult {
+  title?: string;
+  link?: string;
+  url?: string;
+  company?: string;
+  location?: string;
+  salary?: string;
+  snippet?: string;
+  description?: string;
+  type?: string;
+  updated?: string;
 }
 
 async function searchAdzunaCountry(
@@ -185,7 +249,7 @@ async function searchAdzunaCountry(
   const batchTs = Date.now();
 
   return results
-    .map((r: any, index: number): JobListing | null => {
+    .map((r: AdzunaJobResult, index: number): JobListing | null => {
       const title = typeof r.title === "string" ? r.title.trim() : "";
       const urlOut =
         (typeof r.redirect_url === "string" && r.redirect_url) ||
@@ -213,15 +277,16 @@ async function searchAdzunaCountry(
           ? cleanSnippet(r.description)
           : undefined;
 
+      const jobType = mapContractType(r.contract_type, r.contract_time);
       const job: JobListing = {
         id: `adzuna-${country}-${batchTs}-${index}`,
         title: title.substring(0, 100),
         company: company.substring(0, 80),
         location: location.substring(0, 60),
-        type: mapContractType(r.contract_type, r.contract_time, input.jobType),
         url: urlOut,
         source: "Adzuna",
       };
+      if (jobType) job.type = jobType;
       if (salary) job.salary = salary;
       if (description) job.description = description;
       if (typeof r.created === "string" && r.created) job.postedAt = r.created;
@@ -269,17 +334,33 @@ export async function searchAdzuna(
 
 /**
  * Jooble REST — one API key per regional domain.
- * JOOBLE_API_KEY required; JOOBLE_API_BASE optional (default https://jooble.org/api/).
- * For EU results, register on e.g. de.jooble.org and set JOOBLE_API_BASE accordingly.
+ * JOOBLE_API_KEY required.
+ * JOOBLE_API_BASE optional; must be a full HTTPS URL ending with `/api/`
+ * (default `https://jooble.org/api/`). Example EU base: `https://de.jooble.org/api/`.
  */
+function resolveJoobleApiBase(): string {
+  const raw = (Deno.env.get("JOOBLE_API_BASE") || "https://jooble.org/api/").trim();
+  let base = raw.endsWith("/") ? raw : `${raw}/`;
+  if (!/^https:\/\//i.test(base)) {
+    throw new Error(
+      "JOOBLE_API_BASE must be an https:// URL ending with /api/ (e.g. https://de.jooble.org/api/)",
+    );
+  }
+  if (!/\/api\/$/i.test(base)) {
+    throw new Error(
+      "JOOBLE_API_BASE must include the trailing /api/ path (e.g. https://de.jooble.org/api/)",
+    );
+  }
+  return base;
+}
+
 export async function searchJooble(
   input: JobSearchInput,
 ): Promise<JobListing[]> {
   const apiKey = Deno.env.get("JOOBLE_API_KEY");
   if (!apiKey) return [];
 
-  const base = (Deno.env.get("JOOBLE_API_BASE") || "https://jooble.org/api/")
-    .replace(/\/?$/, "/");
+  const base = resolveJoobleApiBase();
   const limit = Math.min(input.limit ?? 12, 50);
   const location = input.location?.trim() || "Europe";
 
@@ -314,7 +395,7 @@ export async function searchJooble(
 
   const batchTs = Date.now();
   return results
-    .map((r: any, index: number): JobListing | null => {
+    .map((r: JoobleJobResult, index: number): JobListing | null => {
       const title = typeof r.title === "string" ? r.title.trim() : "";
       const urlOut =
         (typeof r.link === "string" && r.link) ||
@@ -337,15 +418,16 @@ export async function searchJooble(
           ? cleanSnippet(r.description)
           : undefined;
 
+      const jobType = mapContractType(r.type, null);
       const job: JobListing = {
         id: `jooble-${batchTs}-${index}`,
         title: title.substring(0, 100),
         company: company.substring(0, 80),
         location: loc.substring(0, 60),
-        type: mapContractType(r.type, null, input.jobType),
         url: urlOut,
         source: "Jooble",
       };
+      if (jobType) job.type = jobType;
       if (salary) job.salary = salary;
       if (description) job.description = description;
       if (typeof r.updated === "string" && r.updated) {

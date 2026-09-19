@@ -4,7 +4,7 @@ export interface Job {
   company: string;
   companyLogo: string;
   location: string;
-  type: 'Full-time' | 'Part-time' | 'Contract' | 'Remote' | 'Hybrid';
+  type?: 'Full-time' | 'Part-time' | 'Contract' | 'Remote' | 'Hybrid';
   salary: string;
   description: string;
   requirements: string[];

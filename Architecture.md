@@ -48,7 +48,9 @@ src/
 supabase/
   functions/       edge functions + _shared/
   migrations/
-docs-of-record/    (this set lives at repo root: PRD, Architecture, …)
+# Living AI docs at repo root (not a subdirectory):
+#   PRD.md, Architecture.md, Rules.md, Phases.md,
+#   Design.md, Memory.md, Agents.md
 ```
 
 Project guidance files at **repo root**:

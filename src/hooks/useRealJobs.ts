@@ -61,7 +61,7 @@ export function useRealJobs() {
         companyLogo: `https://ui-avatars.com/api/?name=${encodeURIComponent(job.company.substring(0, 2))}&background=6366f1&color=fff&size=80`,
         location: job.location,
         salary: job.salary || 'Competitive',
-        type: job.type || 'Full-time',
+        type: job.type,
         postedAt: job.postedAt ? formatPostedDate(job.postedAt) : 'Recently',
         matchScore: job.matchScore,
         tags: extractTags(job.title, job.description),

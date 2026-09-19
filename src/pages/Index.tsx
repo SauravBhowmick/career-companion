@@ -169,7 +169,8 @@ const Index = () => {
 
       // Job type filter
       const matchesType =
-        filters.jobTypes.length === 0 || filters.jobTypes.includes(job.type);
+        filters.jobTypes.length === 0 ||
+        (!!job.type && filters.jobTypes.includes(job.type));
 
       // Match score filter
       const matchesScore =
