@@ -1,0 +1,30 @@
+---
+description: Keep JobFlow living AI docs (PRD, Architecture, Rules, Phases, Design, Memory, Agents) updated when the project changes
+alwaysApply: true
+---
+
+# Keep project docs updated
+
+This repo uses living docs at the root:
+
+- `Agents.md` — agent entrypoint
+- `Memory.md` — handoff log (always touch on non-trivial work)
+- `PRD.md`, `Architecture.md`, `Rules.md`, `Phases.md`, `Design.md`
+
+## When you make changes
+
+After implementing or fixing something non-trivial (features, architecture, APIs, UI system, phases, conventions):
+
+1. Append a dated entry to `Memory.md` and refresh the “Current snapshot” / gaps if needed.
+2. Patch any other living doc whose domain changed (don’t leave stale function names, secrets, or phase status).
+3. Keep edits concise — correct the facts; don’t rewrite the whole file unless necessary.
+
+## When you start a session
+
+Prefer reading `Agents.md` + `Memory.md` before exploring the whole codebase.
+
+## Do not
+
+- Skip `Memory.md` after meaningful work
+- Duplicate large README content into these docs
+- Commit secrets into any doc
