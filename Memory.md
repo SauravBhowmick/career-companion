@@ -38,6 +38,13 @@
 
 ## Change log
 
+### 2026-09-19 (review fixes)
+
+- Architecture folder map: living docs listed at repo root (no fake `docs-of-record/` dir)  
+- `job-apis`: salary “up to max” when only max; URL dedupe strips tracking params only (preserves path case + job-id query); Jooble base must be `https://…/api/`; contract type from provider metadata only (no Full-time default / no `jobType` hint); provider `any` → minimal interfaces  
+- `fetch-jobs` / digest: Firecrawl hits typed; digest structured vs Firecrawl use separate abort timeouts  
+- Client: optional `Job.type`; no `Full-time` fallback in `useRealJobs`
+
 ### 2026-09-19
 
 - Created `PRD.md`, `Architecture.md`, `Rules.md`, `Phases.md`, `Design.md`, `Memory.md`, `Agents.md`  

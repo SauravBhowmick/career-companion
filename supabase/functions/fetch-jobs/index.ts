@@ -46,12 +46,26 @@ function detectSource(url: string): string {
   return "Web";
 }
 
+interface FirecrawlSearchHit {
+  url?: string;
+  title?: string;
+  description?: string;
+  markdown?: string;
+}
+
+interface FirecrawlSearchResponse {
+  data?: {
+    web?: FirecrawlSearchHit[];
+  } | FirecrawlSearchHit[];
+  web?: FirecrawlSearchHit[];
+}
+
 async function searchFirecrawl(
   apiKey: string,
   searchQuery: string,
   limit: number,
   signal: AbortSignal,
-): Promise<any[]> {
+): Promise<FirecrawlSearchHit[]> {
   const response = await fetch("https://api.firecrawl.dev/v2/search", {
     method: "POST",
     headers: {
@@ -80,9 +94,9 @@ async function searchFirecrawl(
   }
 
   const raw = await response.text();
-  let data: any;
+  let data: FirecrawlSearchResponse;
   try {
-    data = JSON.parse(raw);
+    data = JSON.parse(raw) as FirecrawlSearchResponse;
   } catch {
     throw new Error(
       `Firecrawl ${response.status}: malformed JSON – ${raw.substring(0, 200)}`,
@@ -226,7 +240,7 @@ function extractLocationFromTitle(title: string): string | null {
 }
 
 function parseJobFromResult(
-  result: any,
+  result: FirecrawlSearchHit,
   index: number,
   fallbackLocation: string | undefined,
   batchTs: number,
@@ -261,12 +275,13 @@ function parseJobFromResult(
     markdown.match(/\$[\d,]+(?:\s*(?:\/yr|\/year|annually|per year|k))/i);
   if (salaryMatch) salary = salaryMatch[0];
 
-  let type = "Full-time";
+  let type: string | undefined;
   const lower = markdown.toLowerCase();
-  if (lower.includes("remote")) type = "Remote";
-  else if (lower.includes("hybrid")) type = "Hybrid";
-  else if (lower.includes("part-time") || lower.includes("part time")) type = "Part-time";
-  else if (lower.includes("contract")) type = "Contract";
+  if (/\bremote\b/.test(lower)) type = "Remote";
+  else if (/\bhybrid\b/.test(lower)) type = "Hybrid";
+  else if (/\bpart[-\s]?time\b/.test(lower)) type = "Part-time";
+  else if (/\bcontract\b/.test(lower)) type = "Contract";
+  else if (/\bfull[-\s]?time\b/.test(lower)) type = "Full-time";
 
   let jobLocation = fallbackLocation || "";
   const locationPatterns = [
@@ -303,12 +318,12 @@ function parseJobFromResult(
     title: cleanTitle,
     company,
     location: jobLocation,
-    salary,
-    type,
     description: cleanDescription(markdown),
     url,
     source: detectSource(url),
   };
+  if (salary) job.salary = salary;
+  if (type) job.type = type;
   if (postedAt) job.postedAt = postedAt;
   return job;
 }
@@ -386,7 +401,7 @@ Deno.serve(async (req) => {
             }),
           );
 
-          const searchResults: any[][] = [];
+          const searchResults: FirecrawlSearchHit[][] = [];
           for (let i = 0; i < settled.length; i++) {
             const entry = settled[i];
             const label = JOB_BOARD_SEARCHES[i].label;
@@ -401,7 +416,7 @@ Deno.serve(async (req) => {
           }
 
           const seenUrls = new Set<string>();
-          const allResults: any[] = [];
+          const allResults: FirecrawlSearchHit[] = [];
           for (const results of searchResults) {
             for (const r of results) {
               const rawUrl = typeof r?.url === "string" ? r.url : "";
@@ -465,8 +480,8 @@ Deno.serve(async (req) => {
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
-    } catch (err: any) {
-      if (err.name === "AbortError") {
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
         return new Response(
           JSON.stringify({
             success: false,

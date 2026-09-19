@@ -267,7 +267,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-key
 | `ADZUNA_APP_KEY` | fetch-jobs, daily-job-digest |
 | `ADZUNA_COUNTRIES` | Optional Adzuna country list when location is empty (default `de,fr,gb,at,pl`) |
 | `JOOBLE_API_KEY` | fetch-jobs, daily-job-digest (optional; request per country at jooble.org/api/about) |
-| `JOOBLE_API_BASE` | Optional Jooble endpoint base (default `https://jooble.org/api/`; use regional host for EU) |
+| `JOOBLE_API_BASE` | Optional Jooble HTTPS base ending in `/api/` (default `https://jooble.org/api/`; e.g. `https://de.jooble.org/api/`). `http://` or missing `/api/` is rejected. |
 | `FIRECRAWL_API_KEY` | fetch-jobs, daily-job-digest (optional if Adzuna/Jooble configured; fills LinkedIn/Xing/StepStone gaps) |
 | `LOVABLE_API_KEY` | match-jobs, parse-cv |
 | `RESEND_API_KEY` | send-application-email, send-job-alert, daily-job-digest |
