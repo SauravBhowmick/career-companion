@@ -154,7 +154,7 @@ sequenceDiagram
 | **State / Data** | React Query, React Context, custom hooks |
 | **Backend** | Supabase — Auth, PostgreSQL (RLS), Storage, Realtime, Edge Functions (Deno) |
 | **AI** | Lovable AI Gateway → `google/gemini-3-flash-preview` |
-| **Scraping** | Firecrawl `/v2/search` |
+| **Jobs data** | Adzuna + Jooble (structured APIs) + Firecrawl `/v2/search` (board scrape fallback) |
 | **Email** | Resend |
 
 ---
@@ -163,12 +163,12 @@ sequenceDiagram
 
 | Function | Trigger | Purpose | External | Auth |
 |----------|---------|---------|----------|------|
-| `fetch-jobs` | Client | Parallel multi-board job scraping, parsing & dedup | Firecrawl | — |
+| `fetch-jobs` | Client | Parallel structured APIs + multi-board scrape, parse & dedup | Adzuna, Jooble, Firecrawl | — |
 | `match-jobs` | Client | AI scoring of jobs against the user's profile | Lovable AI | JWT |
 | `parse-cv` | Client | Extract skills & profile fields from an uploaded CV | Lovable AI | JWT + ownership |
 | `send-application-email` | Client | Application confirmation email + notification | Resend | JWT + rate-limit |
 | `send-job-alert` | Client | New-job alert email + notification | Resend | JWT |
-| `daily-job-digest` | Cron ⏰ | Daily digest email for opted-in users | Firecrawl, Resend | Cron secret |
+| `daily-job-digest` | Cron ⏰ | Daily digest email for opted-in users | Adzuna, Jooble, Firecrawl, Resend | Cron secret |
 
 ---
 
@@ -263,7 +263,12 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-key
 
 | Secret | Used by |
 |--------|---------|
-| `FIRECRAWL_API_KEY` | fetch-jobs, daily-job-digest |
+| `ADZUNA_APP_ID` | fetch-jobs, daily-job-digest (structured EU/UK jobs; free at developer.adzuna.com) |
+| `ADZUNA_APP_KEY` | fetch-jobs, daily-job-digest |
+| `ADZUNA_COUNTRIES` | Optional Adzuna country list when location is empty (default `de,fr,gb,at,pl`) |
+| `JOOBLE_API_KEY` | fetch-jobs, daily-job-digest (optional; request per country at jooble.org/api/about) |
+| `JOOBLE_API_BASE` | Optional Jooble endpoint base (default `https://jooble.org/api/`; use regional host for EU) |
+| `FIRECRAWL_API_KEY` | fetch-jobs, daily-job-digest (optional if Adzuna/Jooble configured; fills LinkedIn/Xing/StepStone gaps) |
 | `LOVABLE_API_KEY` | match-jobs, parse-cv |
 | `RESEND_API_KEY` | send-application-email, send-job-alert, daily-job-digest |
 | `CRON_SECRET` | daily-job-digest |

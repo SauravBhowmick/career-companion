@@ -3,10 +3,16 @@ import {
   buildUnsubscribeUrl,
   buildListUnsubscribeUrl,
 } from "../_shared/unsubscribe.ts";
+import {
+  hasAdzunaCredentials,
+  hasJoobleCredentials,
+  searchStructuredJobApis,
+} from "../_shared/job-apis.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
 const ENABLE_DEV_FALLBACK = Deno.env.get("ENABLE_DEV_FALLBACK") === "true";
+const HAS_STRUCTURED_APIS = hasAdzunaCredentials() || hasJoobleCredentials();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -42,14 +48,35 @@ function maskEmail(email: string): string {
 }
 
 async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
-  if (!FIRECRAWL_API_KEY) {
-    return [];
-  }
-
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const batchTs = Date.now();
 
   try {
+    // Prefer structured partner APIs when configured.
+    if (HAS_STRUCTURED_APIS) {
+      try {
+        const structured = await searchStructuredJobApis({
+          query,
+          limit: 10,
+          signal: controller.signal,
+        });
+        if (structured.jobs.length > 0) {
+          return structured.jobs.map((job, index) => ({
+            id: job.id || `digest-${batchTs}-${index}`,
+            title: job.title,
+            company: job.company,
+            location: job.location || "Unknown",
+            salary: job.salary,
+          }));
+        }
+      } catch (err) {
+        console.warn("Structured job APIs failed for digest:", err);
+      }
+    }
+
+    if (!FIRECRAWL_API_KEY) return [];
+
     const currentYear = new Date().getFullYear();
     const response = await fetch("https://api.firecrawl.dev/v2/search", {
       method: "POST",
@@ -80,7 +107,6 @@ async function fetchLiveJobs(query: string): Promise<DigestJob[]> {
           ? data.data
           : [];
 
-    const batchTs = Date.now();
     return results.map((result: any, index: number) => {
       const url = typeof result.url === "string" ? result.url : "";
       const title = typeof result.title === "string" ? result.title : "Job Position";
@@ -156,10 +182,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       throw new Error("RESEND_API_KEY is not configured");
     }
 
-    if (!FIRECRAWL_API_KEY && !ENABLE_DEV_FALLBACK) {
+    if (!FIRECRAWL_API_KEY && !HAS_STRUCTURED_APIS && !ENABLE_DEV_FALLBACK) {
       throw new Error(
-        "FIRECRAWL_API_KEY is not configured and dev fallback is disabled. " +
-        "Set ENABLE_DEV_FALLBACK=true to use static test data."
+        "No job providers configured (Adzuna/Jooble/Firecrawl) and dev fallback is disabled. " +
+        "Set ADZUNA_APP_ID + ADZUNA_APP_KEY and/or JOOBLE_API_KEY and/or FIRECRAWL_API_KEY, " +
+        "or set ENABLE_DEV_FALLBACK=true for static test data.",
       );
     }
 
